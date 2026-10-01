@@ -1,0 +1,8 @@
+# 开发资料不推送
+assets/
+
+# 系统与临时文件
+*.log
+Thumbs.db
+desktop.ini
+~$*
