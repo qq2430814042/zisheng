@@ -1,6 +1,6 @@
 // main.js — 叙事控制、构字互动与数据动画
 import { ParticleStage, makeClusterCloud, makeDiskCloud } from "./particles.js";
-import { CHARS, LIB, STAGES, STAGE_NAMES, drawGlyph } from "./glyphs.js";
+import { CHARS, LIB, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT } from "./glyphs.js";
 import { AmbientAudio, NOTES } from "./audio.js";
 
 const STAGE_NOTE = {
@@ -35,6 +35,7 @@ stage.setWorld(worldW, worldH);
 
 // 桌面端采用"左文右效"布局：粒子效果集中在右半区，左侧留给文字面板
 const SIDE = !L.portrait;
+const REDUCED = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 function shiftCloud(pos, dx, dy, s) {
   for (let i = 0; i < pos.length; i += 3) {
     pos[i] = pos[i] * s + dx;
@@ -220,6 +221,13 @@ soundBtn.addEventListener("click", async () => {
   }
 });
 
+// 按笔画数分配音高（2 画最低，7 画以上最高）
+const PITCHES = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25];
+function pluckForChar(ch) {
+  const n = STROKE_COUNT[ch] || 4;
+  audio.pluck(PITCHES[Math.max(0, Math.min(PITCHES.length - 1, n - 2))]);
+}
+
 let activeId = null;
 function applySection(sec) {
   if (activeId === sec.id) return;
@@ -289,6 +297,19 @@ window.addEventListener(
 
 window.addEventListener("keydown", (e) => {
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+  if ((e.ctrlKey || e.metaKey) && activeId === "write") {
+    const k = e.key.toLowerCase();
+    if (k === "z" && !e.shiftKey) {
+      e.preventDefault();
+      inkUndo();
+      return;
+    }
+    if (k === "y" || (k === "z" && e.shiftKey)) {
+      e.preventDefault();
+      inkRedoFn();
+      return;
+    }
+  }
   if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "PageDown") {
     e.preventDefault();
     goTo(currentIndex + 1);
@@ -374,20 +395,83 @@ rangeEl.addEventListener("input", () => {
 });
 syncLibChips();
 
-// ---------- 写字：手写粒子化 ----------
+// ---------- 写字：手写粒子化（笔锋 / 撤销 / 重做） ----------
 const inkCanvas = document.getElementById("ink-canvas");
 const inkCtx = inkCanvas.getContext("2d");
 const writeHint = document.getElementById("write-hint");
+const writeFlash = document.getElementById("write-flash");
 let inkStrokes = [];
+let inkRedo = [];
 let inkCurrent = null;
+let inkLastT = 0;
 let inkHasContent = false;
+
+const INK_MIN_W = 2.6;
+const INK_MAX_W = 8.5;
+const INK_INK = "rgba(233,230,223,.88)";
+
+function inkWidthFor(speed) {
+  return Math.max(INK_MIN_W, Math.min(INK_MAX_W, INK_MAX_W - speed * 1.8));
+}
+
+function inkSegment(ctx, p1, p2) {
+  ctx.strokeStyle = INK_INK;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = (p1.w + p2.w) / 2;
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
+  ctx.stroke();
+}
+
+function inkRedraw() {
+  inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+  if (writeMode === "guide" && guideTarget) {
+    inkCtx.save();
+    inkCtx.globalAlpha = 0.13;
+    inkCtx.fillStyle = "#e9e6df";
+    inkCtx.font = "160px " + FONT_STACK;
+    inkCtx.textAlign = "center";
+    inkCtx.textBaseline = "middle";
+    inkCtx.fillText(guideTarget, inkCanvas.width / 2, inkCanvas.height / 2 + 4);
+    inkCtx.restore();
+  }
+  for (const st of inkStrokes) {
+    if (st.length === 1) {
+      const p = st[0];
+      inkCtx.beginPath();
+      inkCtx.arc(p.x, p.y, Math.max(1.4, p.w / 2), 0, Math.PI * 2);
+      inkCtx.fillStyle = INK_INK;
+      inkCtx.fill();
+    } else {
+      for (let i = 1; i < st.length; i++) inkSegment(inkCtx, st[i - 1], st[i]);
+    }
+  }
+}
 
 function inkClear() {
   inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
   inkStrokes = [];
+  inkRedo = [];
   inkCurrent = null;
   inkHasContent = false;
-  writeHint.textContent = "提示：鼠标或手指按住即可书写";
+  inkCanvas.classList.remove("dimmed");
+  writeHint.textContent = "提示：鼠标或手指按住书写（Ctrl+Z 撤销）";
+}
+
+function inkUndo() {
+  if (!inkStrokes.length) return;
+  inkRedo.push(inkStrokes.pop());
+  inkRedraw();
+  inkHasContent = inkStrokes.length > 0;
+}
+
+function inkRedoFn() {
+  if (!inkRedo.length) return;
+  inkStrokes.push(inkRedo.pop());
+  inkRedraw();
+  inkHasContent = true;
 }
 
 function inkPos(e) {
@@ -401,9 +485,14 @@ function inkPos(e) {
 inkCanvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   inkCanvas.setPointerCapture(e.pointerId);
-  inkCurrent = [inkPos(e)];
+  inkCanvas.classList.remove("dimmed");
+  const p = inkPos(e);
+  p.w = INK_MAX_W * 0.8;
+  inkCurrent = [p];
   inkStrokes.push(inkCurrent);
+  inkRedo = [];
   inkHasContent = true;
+  inkLastT = e.timeStamp;
 });
 
 inkCanvas.addEventListener("pointermove", (e) => {
@@ -411,26 +500,31 @@ inkCanvas.addEventListener("pointermove", (e) => {
   e.preventDefault();
   const p = inkPos(e);
   const last = inkCurrent[inkCurrent.length - 1];
-  if (Math.hypot(p.x - last.x, p.y - last.y) < 2) return;
+  const dist = Math.hypot(p.x - last.x, p.y - last.y);
+  if (dist < 1.5) return;
+  const dt = Math.max(1, e.timeStamp - inkLastT);
+  inkLastT = e.timeStamp;
+  p.w = inkWidthFor(dist / dt);
   inkCurrent.push(p);
-  inkCtx.strokeStyle = "rgba(233,230,223,.85)";
-  inkCtx.lineWidth = 7;
-  inkCtx.lineCap = "round";
-  inkCtx.lineJoin = "round";
-  inkCtx.beginPath();
-  inkCtx.moveTo(last.x, last.y);
-  inkCtx.lineTo(p.x, p.y);
-  inkCtx.stroke();
+  inkSegment(inkCtx, last, p);
 });
 
 function inkEnd() {
   if (!inkCurrent) return;
-  if (inkCurrent.length === 1) {
-    const p = inkCurrent[0];
+  const st = inkCurrent;
+  if (st.length === 1) {
+    const p = st[0];
+    p.w = Math.max(2.2, p.w * 0.55);
     inkCtx.beginPath();
-    inkCtx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
-    inkCtx.fillStyle = "rgba(233,230,223,.85)";
+    inkCtx.arc(p.x, p.y, p.w / 2, 0, Math.PI * 2);
+    inkCtx.fillStyle = INK_INK;
     inkCtx.fill();
+  } else {
+    // 收笔：末端两笔收细
+    const n = st.length;
+    st[n - 1].w = Math.max(1.6, st[n - 1].w * 0.55);
+    if (n > 2) st[n - 2].w = Math.max(1.8, st[n - 2].w * 0.75);
+    inkRedraw();
   }
   inkCurrent = null;
 }
@@ -461,19 +555,21 @@ function buildInkCloud() {
     ctx.translate(-(minX + bw / 2), -(minY + bh / 2));
     ctx.strokeStyle = "#fff";
     ctx.fillStyle = "#fff";
-    ctx.lineWidth = 6;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     for (const st of inkStrokes) {
       if (st.length === 1) {
         ctx.beginPath();
-        ctx.arc(st[0].x, st[0].y, 3, 0, Math.PI * 2);
+        ctx.arc(st[0].x, st[0].y, Math.max(1.4, st[0].w / 2), 0, Math.PI * 2);
         ctx.fill();
       } else {
-        ctx.beginPath();
-        ctx.moveTo(st[0].x, st[0].y);
-        for (let i = 1; i < st.length; i++) ctx.lineTo(st[i].x, st[i].y);
-        ctx.stroke();
+        for (let i = 1; i < st.length; i++) {
+          ctx.lineWidth = (st[i - 1].w + st[i].w) / 2;
+          ctx.beginPath();
+          ctx.moveTo(st[i - 1].x, st[i - 1].y);
+          ctx.lineTo(st[i].x, st[i].y);
+          ctx.stroke();
+        }
       }
     }
     ctx.restore();
@@ -484,6 +580,10 @@ function buildInkCloud() {
 
 function applyWriteCloud() {
   if (activeId !== "write") return;
+  if (writeMode === "name") {
+    stage.setCloud(ensureCloud("name:prompt", () => buildTextCloud("名字", L.portrait ? 220 : 250, 0.28)));
+    return;
+  }
   if (!inkHasContent) {
     stage.setCloud(ensureCloud("write:prompt", () => buildTextCloud("写", L.portrait ? 240 : 280, 0.28)));
   }
@@ -497,9 +597,20 @@ document.getElementById("btn-particle").addEventListener("click", () => {
   stage.addCloud("write:user", buildInkCloud());
   stage.setCloud("write:user", 1.4);
   stage.setColor("#d9ecff");
-  writeHint.textContent = "你的字，已经被粒子接住了";
+  inkCanvas.classList.add("dimmed");
+  writeFlash.classList.remove("on");
+  void writeFlash.offsetWidth;
+  writeFlash.classList.add("on");
   audio.pluck(NOTES.jue);
+  if (writeMode === "free") {
+    const ranked = recognizeInk();
+    renderRecogCard(ranked);
+  } else {
+    writeHint.textContent = "粒子接住了。点“评分”对照描红看看像不像。";
+  }
 });
+document.getElementById("btn-undo").addEventListener("click", inkUndo);
+document.getElementById("btn-redo").addEventListener("click", inkRedoFn);
 document.getElementById("btn-join").addEventListener("click", () => {
   stage.setCloud("idle2", 1.6);
   stage.setColor("#9ab8d8");
@@ -512,6 +623,381 @@ document.getElementById("btn-clear").addEventListener("click", () => {
 });
 inkClear();
 
+// ---------- 写字：模式 / 识别 / 考据联动 ----------
+let writeMode = "free";
+let guideTarget = "牛";
+let evolveTimer = null;
+const modeFreeBtn = document.getElementById("mode-free");
+const modeGuideBtn = document.getElementById("mode-guide");
+const modeNameBtn = document.getElementById("mode-name");
+const guideBar = document.getElementById("guide-bar");
+const guideCharSel = document.getElementById("guide-char");
+const guideRandomBtn = document.getElementById("guide-random");
+const guideInfo = document.getElementById("guide-info");
+const btnGrade = document.getElementById("btn-grade");
+const recogCard = document.getElementById("recog-card");
+const etyCard = document.getElementById("ety-card");
+const nameBar = document.getElementById("name-bar");
+const nameInput = document.getElementById("name-input");
+const nameGenerateBtn = document.getElementById("name-generate");
+const nameSaveBtn = document.getElementById("name-save");
+const nameEvolve = document.getElementById("name-evolve");
+const writeWrap = document.querySelector(".write-wrap");
+
+LIB.forEach((ch) => {
+  const o = document.createElement("option");
+  o.value = ch;
+  o.textContent = ch + "　" + STROKE_COUNT[ch] + "画";
+  guideCharSel.appendChild(o);
+});
+guideCharSel.value = guideTarget;
+
+function updateGuideInfo() {
+  guideTarget = guideCharSel.value;
+  guideInfo.textContent = STROKE_COUNT[guideTarget] + " 画";
+  if (writeMode === "guide") inkRedraw();
+}
+
+function setWriteMode(m) {
+  writeMode = m;
+  modeFreeBtn.classList.toggle("on", m === "free");
+  modeGuideBtn.classList.toggle("on", m === "guide");
+  modeNameBtn.classList.toggle("on", m === "name");
+  guideBar.hidden = m !== "guide";
+  btnGrade.hidden = m !== "guide";
+  nameBar.hidden = m !== "name";
+  writeWrap.hidden = m === "name";
+  recogCard.hidden = true;
+  recogCard.innerHTML = "";
+  nameEvolve.hidden = true;
+  nameEvolve.innerHTML = "";
+  const leads = {
+    free: "写下任意一笔一字，让粒子接住它。",
+    guide: "照着浅色描红写一遍，看看像不像。",
+    name: "输入你的名字，生成一张属于你的粒子星图。",
+  };
+  document.getElementById("write-lead").textContent = leads[m] || leads.free;
+  inkClear();
+  updateGuideInfo();
+  if (activeId === "write") applyWriteCloud();
+}
+modeFreeBtn.addEventListener("click", () => setWriteMode("free"));
+modeGuideBtn.addEventListener("click", () => setWriteMode("guide"));
+modeNameBtn.addEventListener("click", () => setWriteMode("name"));
+guideCharSel.addEventListener("change", updateGuideInfo);
+guideRandomBtn.addEventListener("click", () => {
+  const pool = LIB.filter((c) => c !== guideTarget);
+  guideCharSel.value = pool[Math.floor(Math.random() * pool.length)];
+  updateGuideInfo();
+});
+
+// ---- 名字图：生成与保存 ----
+nameGenerateBtn.addEventListener("click", () => {
+  const name = nameInput.value.trim().replace(/\s+/g, "").slice(0, 4);
+  if (!name) {
+    writeHint.textContent = "先输入名字（2–4 字）";
+    return;
+  }
+  const size = name.length >= 4 ? 200 : name.length === 3 ? 240 : 280;
+  stage.addCloud("name:user", buildTextCloud(name, size, 0.5));
+  stage.setCloud("name:user", 1.5);
+  stage.setColor("#ffd9a0");
+  nameSaveBtn.disabled = false;
+  writeHint.textContent = "生成好了——可以点“保存图片”带走它";
+  audio.pluck(NOTES.gongHigh);
+  const uniq = [...new Set(name.split(""))].filter((c) => LIB.includes(c));
+  nameEvolve.innerHTML = "";
+  uniq.forEach((c) => {
+    const b = document.createElement("button");
+    b.textContent = "看「" + c + "」的三千年";
+    b.addEventListener("click", () => showEvolution(c));
+    nameEvolve.appendChild(b);
+  });
+  nameEvolve.hidden = uniq.length === 0;
+});
+
+function saveNameImage() {
+  stage.render();
+  const src = stage.renderer.domElement;
+  const out = document.createElement("canvas");
+  out.width = 1920;
+  out.height = 1080;
+  const c = out.getContext("2d");
+  const grad = c.createLinearGradient(0, 0, 1920, 1080);
+  grad.addColorStop(0, "#0b0b0f");
+  grad.addColorStop(1, "#14100a");
+  c.fillStyle = grad;
+  c.fillRect(0, 0, 1920, 1080);
+  const scale = Math.max(1920 / src.width, 1080 / src.height);
+  const dw = src.width * scale;
+  const dh = src.height * scale;
+  c.drawImage(src, (1920 - dw) / 2, (1080 - dh) / 2, dw, dh);
+  c.fillStyle = "rgba(233,230,223,.88)";
+  c.font = '46px "KaiTi","STKaiti","楷体",serif';
+  c.textAlign = "left";
+  c.fillText("名字 · 星图", 84, 138);
+  c.fillStyle = "rgba(233,230,223,.5)";
+  c.font = '24px "Microsoft YaHei",sans-serif';
+  c.fillText("《字·生》——汉字五体演变的粒子交互体验", 86, 184);
+  c.textAlign = "right";
+  c.fillText(new Date().toLocaleDateString("zh-CN"), 1836, 138);
+  const a = document.createElement("a");
+  a.download = "字生-名字星图.png";
+  a.href = out.toDataURL("image/png");
+  a.click();
+  writeHint.textContent = "已保存图片";
+  audio.pluck(NOTES.gongHigh);
+}
+nameSaveBtn.addEventListener("click", saveNameImage);
+
+// ---- 识别引擎：包围盒归一化 → 14×14 覆盖网格 → 余弦相似度 ----
+const FEAT_N = 14;
+function maskFeature(drawFn, W, H) {
+  const cv = document.createElement("canvas");
+  cv.width = W;
+  cv.height = H;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#fff";
+  ctx.strokeStyle = "#fff";
+  drawFn(ctx, W, H);
+  const img = ctx.getImageData(0, 0, W, H).data;
+  let minX = W, minY = H, maxX = -1, maxY = -1;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (img[(y * W + x) * 4 + 3] > 80) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  const f = new Float32Array(FEAT_N * FEAT_N);
+  if (maxX < 0) return f;
+  const bw = maxX - minX + 1;
+  const bh = maxY - minY + 1;
+  const side = Math.max(bw, bh);
+  const ox = minX - (side - bw) / 2;
+  const oy = minY - (side - bh) / 2;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (img[(y * W + x) * 4 + 3] <= 80) continue;
+      const gx = Math.min(FEAT_N - 1, Math.max(0, Math.floor(((x - ox) / side) * FEAT_N)));
+      const gy = Math.min(FEAT_N - 1, Math.max(0, Math.floor(((y - oy) / side) * FEAT_N)));
+      f[gy * FEAT_N + gx] += 1;
+    }
+  }
+  let n = 0;
+  for (let i = 0; i < f.length; i++) n += f[i] * f[i];
+  n = Math.sqrt(n) || 1;
+  for (let i = 0; i < f.length; i++) f[i] /= n;
+  return f;
+}
+
+const TEMPLATES = {};
+LIB.forEach((ch) => {
+  TEMPLATES[ch] = maskFeature((ctx, W, H) => {
+    ctx.font = Math.round(H * 0.82) + "px " + FONT_STACK;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(ch, W / 2, H / 2 + H * 0.01);
+  }, 72, 72);
+});
+
+function inkFeature() {
+  return maskFeature((ctx, W, H) => {
+    const pad = 10;
+    const s = (W - pad * 2) / inkCanvas.width;
+    ctx.save();
+    ctx.translate(pad, pad);
+    ctx.scale(s, s);
+    ctx.strokeStyle = "#fff";
+    ctx.fillStyle = "#fff";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const st of inkStrokes) {
+      if (st.length === 1) {
+        ctx.beginPath();
+        ctx.arc(st[0].x, st[0].y, Math.max(3, st[0].w / 2), 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        for (let i = 1; i < st.length; i++) {
+          ctx.lineWidth = Math.max(4, (st[i - 1].w + st[i].w) / 2);
+          ctx.beginPath();
+          ctx.moveTo(st[i - 1].x, st[i - 1].y);
+          ctx.lineTo(st[i].x, st[i].y);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.restore();
+  }, 120, 120);
+}
+
+function similarity(f, t) {
+  let dot = 0;
+  for (let i = 0; i < f.length; i++) dot += f[i] * t[i];
+  return dot;
+}
+
+function recognizeInk() {
+  const f = inkFeature();
+  const ranked = LIB.map((ch) => ({ ch, score: similarity(f, TEMPLATES[ch]) }));
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked;
+}
+
+// ---- 识别结果卡 ----
+function bindRecog() {
+  const evolveBtn = recogCard.querySelector("[data-evolve]");
+  const againBtn = recogCard.querySelector("[data-again]");
+  if (evolveBtn) evolveBtn.addEventListener("click", () => showEvolution(evolveBtn.dataset.evolve));
+  if (againBtn)
+    againBtn.addEventListener("click", () => {
+      inkClear();
+      recogCard.hidden = true;
+      if (activeId === "write") applyWriteCloud();
+    });
+}
+
+function renderRecogCard(ranked) {
+  const top = ranked[0];
+  const second = ranked[1];
+  recogCard.hidden = false;
+  const pct = (s) => Math.min(95, Math.round(s * 100));
+  if (top.score >= 0.55) {
+    recogCard.innerHTML =
+      "<div>粒子接住了你的字，它很像 <b>" +
+      top.ch +
+      "</b>（" +
+      pct(top.score) +
+      "%）</div>" +
+      '<div class="recog-actions"><button data-evolve="' +
+      top.ch +
+      '">看它三千年</button><button data-again>再写一次</button></div>';
+    writeHint.textContent = "认出来了——看看它的三千年吧";
+    pluckForChar(top.ch);
+  } else if (top.score >= 0.42) {
+    recogCard.innerHTML =
+      "<div>有点像 <b>" +
+      top.ch +
+      "</b>（" +
+      pct(top.score) +
+      "%），也像 <b>" +
+      second.ch +
+      "</b>（" +
+      pct(second.score) +
+      "%）</div>" +
+      '<div class="recog-actions"><button data-evolve="' +
+      top.ch +
+      '">看' +
+      top.ch +
+      '的三千年</button><button data-evolve="' +
+      second.ch +
+      '">看' +
+      second.ch +
+      '的三千年</button><button data-again>再写一次</button></div>';
+    writeHint.textContent = "半认出来了——也可以切到「跟着写」慢慢来";
+    audio.pluck(NOTES.yu);
+  } else {
+    recogCard.innerHTML =
+      "<div>这次没有认出来——它已经属于星河了。试试笔画少的字，或切到「跟着写」模式。</div>" +
+      '<div class="recog-actions"><button data-again>再写一次</button></div>';
+    writeHint.textContent = "没关系，再写一个";
+    audio.pluck(NOTES.yu);
+  }
+  bindRecog();
+}
+
+// ---- 跟着写：评分 ----
+btnGrade.addEventListener("click", () => {
+  if (!inkHasContent) {
+    writeHint.textContent = "先在描红底上写一遍";
+    return;
+  }
+  stage.addCloud("write:user", buildInkCloud());
+  stage.setCloud("write:user", 1.2);
+  stage.setColor("#d9ecff");
+  inkCanvas.classList.add("dimmed");
+  writeFlash.classList.remove("on");
+  void writeFlash.offsetWidth;
+  writeFlash.classList.add("on");
+  const f = inkFeature();
+  const sim = Math.min(95, Math.round(similarity(f, TEMPLATES[guideTarget]) * 100));
+  const sc = STROKE_COUNT[guideTarget];
+  const mine = inkStrokes.length;
+  const scText =
+    mine === sc
+      ? "笔画数 " + mine + "/" + sc + " ✓"
+      : "笔画数 " + mine + "/" + sc + (mine > sc ? "（多了 " + (mine - sc) + " 笔）" : "（还差 " + (sc - mine) + " 笔）");
+  const comment = sim >= 70 ? "很像了！" : sim >= 45 ? "有点感觉了，再写一遍会更像。" : "还不太像，对照描红慢慢来。";
+  recogCard.hidden = false;
+  recogCard.innerHTML =
+    "<div>与「" +
+    guideTarget +
+    "」的相似度 <b>" +
+    sim +
+    "%</b>　" +
+    scText +
+    "</div><div>" +
+    comment +
+    "</div>" +
+    '<div class="recog-actions"><button data-evolve="' +
+    guideTarget +
+    '">看它三千年</button><button data-again>再写一次</button></div>';
+  bindRecog();
+  if (sim >= 70) pluckForChar(guideTarget);
+  else audio.pluck(NOTES.yu);
+});
+
+// ---- 联动：跳一字千年并自动推演 + 考据卡 ----
+function showEvolution(ch) {
+  libChar = ch;
+  syncLibChips();
+  libProgress = 0;
+  rangeEl.value = 0;
+  const idx = sections.findIndex((s) => s.id === "timeline");
+  if (idx >= 0) goTo(idx);
+  showTimeline(true);
+  clearInterval(evolveTimer);
+  let v = 0;
+  evolveTimer = setInterval(() => {
+    v += 4;
+    if (v >= 400) {
+      v = 400;
+      clearInterval(evolveTimer);
+    }
+    rangeEl.value = v;
+    libProgress = v / 100;
+    showTimeline(false);
+    if (v >= 400) setTimeout(() => showEtyCard(ch), 700);
+  }, 55);
+  pluckForChar(ch);
+}
+
+function showEtyCard(ch) {
+  const e = ETY[ch] || { method: "象形", meaning: ch, note: "" };
+  document.getElementById("ety-char").textContent = ch;
+  document.getElementById("ety-method").textContent = e.method;
+  document.getElementById("ety-meaning").textContent = "本义：" + e.meaning;
+  document.getElementById("ety-note").textContent = e.note;
+  etyCard.classList.add("show");
+  etyCard.setAttribute("aria-hidden", "false");
+}
+function closeEtyCard() {
+  etyCard.classList.remove("show");
+  etyCard.setAttribute("aria-hidden", "true");
+}
+document.getElementById("ety-close").addEventListener("click", closeEtyCard);
+etyCard.addEventListener("click", (e) => {
+  if (e.target === etyCard) closeEtyCard();
+});
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeEtyCard();
+});
+updateGuideInfo();
+
 // ---------- 认字：甲骨文竞猜 ----------
 const QUIZ = [
   { ch: "日", opts: ["日", "目", "口", "田"], tip: "圆的轮廓像太阳，里面的一笔是光的标记。" },
@@ -522,6 +1008,10 @@ const QUIZ = [
   { ch: "木", opts: ["木", "大", "火", "山"], tip: "一棵树：树干、枝丫和根。" },
   { ch: "火", opts: ["火", "水", "山", "雨"], tip: "腾起的火苗和四溅的火星。" },
   { ch: "目", opts: ["目", "日", "口", "田"], tip: "一只眼睛，中间是瞳孔。" },
+  { ch: "牛", opts: ["牛", "羊", "手", "竹"], tip: "正面牛头：两角与一横是面额，中竖是鼻梁。" },
+  { ch: "刀", opts: ["刀", "弓", "人", "大"], tip: "刀身与刀柄，刃口内弯。" },
+  { ch: "舟", opts: ["舟", "月", "门", "云"], tip: "船身与横向的船板。" },
+  { ch: "犬", opts: ["犬", "大", "木", "人"], tip: "侧身站立的犬形，尾巴上翘。" },
 ];
 let quizIndex = 0;
 let quizScore = 0;
@@ -741,12 +1231,22 @@ setTimeout(() => {
   } else {
     goTo(0, true);
   }
+  // 首帧就绪后淡出加载开场
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const el = document.getElementById("loader");
+      if (el) {
+        el.classList.add("done");
+        setTimeout(() => el.remove(), 800);
+      }
+    });
+  });
 }, 0);
 window.addEventListener("load", () => window.scrollTo(0, 0));
 
-// 首访微引导：目录逐项点亮一次
+// 首访微引导：目录逐项点亮一次（减少动态偏好下不播）
 try {
-  if (!sessionStorage.getItem("zs_nudge") && startIdx === 0) {
+  if (!REDUCED && !sessionStorage.getItem("zs_nudge") && startIdx === 0) {
     sessionStorage.setItem("zs_nudge", "1");
     tocItems.forEach((el, i) => {
       setTimeout(() => {
@@ -819,22 +1319,42 @@ if (devRaw) {
         if (args[1] === "go") btnCombine.click();
       }
       if (target === "write") {
-        const mk = (pts) => {
-          const st = pts.map(([x, y]) => ({ x, y }));
-          inkStrokes.push(st);
-          inkCtx.strokeStyle = "rgba(233,230,223,.85)";
-          inkCtx.lineWidth = 7;
-          inkCtx.lineCap = "round";
-          inkCtx.lineJoin = "round";
-          inkCtx.beginPath();
-          inkCtx.moveTo(st[0].x, st[0].y);
-          for (let i = 1; i < st.length; i++) inkCtx.lineTo(st[i].x, st[i].y);
-          inkCtx.stroke();
-        };
-        mk([[200, 70], [230, 130], [260, 190], [285, 250]]);
-        mk([[255, 165], [285, 230], [320, 290]]);
-        inkHasContent = true;
-        if (args[0] === "go") document.getElementById("btn-particle").click();
+        if (args[0] === "name") {
+          setWriteMode("name");
+          nameInput.value = "牛景飞";
+          nameGenerateBtn.click();
+        } else {
+          if (args[0] === "guide" || args[0] === "grade" || args[0] === "evolve") {
+            setWriteMode("guide");
+            guideCharSel.value = "牛";
+            updateGuideInfo();
+          }
+          const mk = (pts) => {
+            const st = pts.map(([x, y]) => ({ x, y, w: 7 }));
+            inkStrokes.push(st);
+            inkCtx.strokeStyle = "rgba(233,230,223,.85)";
+            inkCtx.lineWidth = 7;
+            inkCtx.lineCap = "round";
+            inkCtx.lineJoin = "round";
+            inkCtx.beginPath();
+            inkCtx.moveTo(st[0].x, st[0].y);
+            for (let i = 1; i < st.length; i++) inkCtx.lineTo(st[i].x, st[i].y);
+            inkCtx.stroke();
+          };
+          mk([[190, 80], [250, 68], [310, 68], [370, 80], [430, 95]]);
+          mk([[300, 78], [300, 280]]);
+          mk([[210, 170], [390, 170]]);
+          inkHasContent = true;
+          if (args[0] === "go") document.getElementById("btn-particle").click();
+          if (args[0] === "grade") document.getElementById("btn-grade").click();
+          if (args[0] === "evolve") {
+            document.getElementById("btn-grade").click();
+            setTimeout(() => {
+              const b = recogCard.querySelector("[data-evolve]");
+              if (b) b.click();
+            }, 600);
+          }
+        }
       }
       if (target === "quiz") {
         const q = QUIZ[Math.min(quizIndex, QUIZ.length - 1)];

@@ -95,6 +95,7 @@ export class ParticleStage {
       antialias: false,
       alpha: false,
       powerPreference: "high-performance",
+      preserveDrawingBuffer: true,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 

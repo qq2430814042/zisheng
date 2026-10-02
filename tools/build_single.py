@@ -37,6 +37,12 @@ old_tag = '<script type="module" src="js/main.js"></script>'
 assert old_tag in html, "script tag not found"
 inline = '<script type="module">\n' + full + "\n</script>"
 html = html.replace(old_tag, inline)
+
+css = read(r"css\style.css")
+old_css = '<link rel="stylesheet" href="css/style.css">'
+assert old_css in html, "css link not found"
+html = html.replace(old_css, "<style>\n" + css + "\n</style>")
+
 html = html.replace("<title>字·生 —— 汉字五体演变的粒子交互体验</title>",
                     "<title>字·生 —— 汉字五体演变的粒子交互体验（单文件版）</title>")
 
