@@ -29,6 +29,11 @@ const STAGE_ERA = {
 };
 const EVO_ANCIENT = ["oracle", "bronze", "bamboo-silk", "seal", "clerical"];
 
+// 某字是否可在"一字千年"中推演（精选 30 或全量字库 14,873）
+function hasEvo(ch) {
+  return !!STROKES[ch] || !!evoAvailable(ch);
+}
+
 // 某字的阶段序列：精选 30 字固定五体；扩展字按实际收录的阶段（可缺早期阶段）
 function seqOf(ch) {
   if (LIB.includes(ch)) return STROKES[ch] ? STAGES : null;
@@ -959,7 +964,7 @@ nameGenerateBtn.addEventListener("click", () => {
   nameSaveBtn.disabled = false;
   writeHint.textContent = "生成好了——可以点“保存图片”带走它";
   audio.pluck(NOTES.gongHigh);
-  const uniq = [...new Set(name.split(""))].filter((c) => LIB.includes(c));
+  const uniq = [...new Set(name.split(""))].filter((c) => hasEvo(c));
   nameEvolve.innerHTML = "";
   uniq.forEach((c) => {
     const b = document.createElement("button");
@@ -1215,7 +1220,7 @@ function renderRecogCardHS(results) {
   recogCard.hidden = false;
   const pct = (s) => Math.min(99, Math.round(s * 100));
   if (top.score >= 0.85 && top.score - second.score >= 0.25) {
-    if (LIB.includes(top.ch)) {
+    if (hasEvo(top.ch)) {
       recogCard.innerHTML =
         "<div>粒子接住了你的字，它很像 <b>" +
         top.ch +
@@ -1233,9 +1238,9 @@ function renderRecogCardHS(results) {
         top.ch +
         "</b>（" +
         pct(top.score) +
-        "%）。它的三千年还没画进我们的库——目前收录 30 个字。</div>" +
+        "%）。它在字形库中暂未收录——可能是很晚才出现的字。</div>" +
         '<div class="recog-actions"><button data-again>再写一次</button></div>';
-      writeHint.textContent = "认出来了——这个字的三千年还没画到";
+      writeHint.textContent = "认出来了——这个字的三千年暂时还没有";
       pluckForChar(top.ch);
     }
   } else {
@@ -1275,7 +1280,7 @@ function bindRecog() {
 // 用户从 Top-3 中点选确认
 function confirmRecog(ch) {
   recogCard.hidden = false;
-  if (LIB.includes(ch)) {
+  if (hasEvo(ch)) {
     recogCard.innerHTML =
       "<div>好，是 <b>" +
       ch +
@@ -1288,9 +1293,9 @@ function confirmRecog(ch) {
     recogCard.innerHTML =
       "<div>好，是 <b>" +
       ch +
-      "</b>。它的三千年还没画进我们的库——目前收录 30 个字（日 月 山 水 人 木 火 雨 目 口 田 大 牛 羊 女 子 刀 弓 门 舟 云 天 心 手 耳 鸟 土 石 竹 犬）。</div>" +
+      "</b>。它在字形库中暂未收录——可能是很晚才出现的字。</div>" +
       '<div class="recog-actions"><button data-again>再写一次</button></div>';
-    writeHint.textContent = "认出来了——这个字的三千年还没画到";
+    writeHint.textContent = "认出来了——这个字的三千年暂时还没有";
   }
   pluckForChar(ch);
   bindRecog();
@@ -1303,7 +1308,7 @@ function renderRecogCard(ranked) {
   recogCard.hidden = false;
   const pct = (s) => Math.min(95, Math.round(s * 100));
   if (top.score >= 0.65 && margin >= 0.05) {
-    if (LIB.includes(top.ch)) {
+    if (hasEvo(top.ch)) {
       recogCard.innerHTML =
         "<div>粒子接住了你的字，它很像 <b>" +
         top.ch +
@@ -1321,9 +1326,9 @@ function renderRecogCard(ranked) {
         top.ch +
         "</b>（" +
         pct(top.score) +
-        "%）。它的三千年还没画进我们的库——目前收录 30 个字。</div>" +
+        "%）。它在字形库中暂未收录——可能是很晚才出现的字。</div>" +
         '<div class="recog-actions"><button data-again>再写一次</button></div>';
-      writeHint.textContent = "认出来了——这个字的三千年还没画到";
+      writeHint.textContent = "认出来了——这个字的三千年暂时还没有";
       pluckForChar(top.ch);
     }
   } else {
