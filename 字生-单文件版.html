@@ -55059,6 +55059,7 @@ class ParticleStage {
 
 
 
+
 const STAGE_NOTE = {
   oracle: NOTES.gong,
   bronze: NOTES.shang,
@@ -55972,8 +55973,8 @@ function computeFeatures(drawFn, W, H) {
   return { cov, grad };
 }
 
-// 模板：识别面 RECOG（172 字），每字 3 个角度增强（±4°+0°），提升容错
-const TEMPLATE_ANGLES = [-4, 0, 4];
+// 模板：识别面 RECOG，每字 5 个角度增强（±8°/±4°/0°），提升容错
+const TEMPLATE_ANGLES = [-8, -4, 0, 4, 8];
 const TEMPLATES = {};
 RECOG.forEach((ch) => {
   TEMPLATES[ch] = TEMPLATE_ANGLES.map((deg) =>
@@ -56028,13 +56029,18 @@ function similarity(f, t) {
 
 function recognizeInk() {
   const f = inkFeatures();
+  const mine = inkStrokes.length;
   const ranked = RECOG.map((ch) => {
     let best = 0;
     for (const t of TEMPLATES[ch]) {
       const s = similarity(f, t);
       if (s > best) best = s;
     }
-    return { ch, score: best };
+    // 笔画数门控：与用户实际笔画数差异越大，得分折损越多（软门控）
+    const exp = RECOG_STROKES[ch] || STROKE_COUNT[ch];
+    let score = best;
+    if (exp && mine) score *= 1 - Math.min(0.5, 0.12 * Math.abs(mine - exp));
+    return { ch, score };
   });
   ranked.sort((a, b) => b.score - a.score);
   return ranked;
@@ -56042,6 +56048,9 @@ function recognizeInk() {
 
 // ---- 识别结果卡 ----
 function bindRecog() {
+  recogCard.querySelectorAll("[data-pick]").forEach((b) =>
+    b.addEventListener("click", () => confirmRecog(b.dataset.pick))
+  );
   const evolveBtn = recogCard.querySelector("[data-evolve]");
   const againBtn = recogCard.querySelector("[data-again]");
   if (evolveBtn)
@@ -56056,14 +56065,36 @@ function bindRecog() {
     });
 }
 
+// 用户从 Top-3 中点选确认
+function confirmRecog(ch) {
+  recogCard.hidden = false;
+  if (LIB.includes(ch)) {
+    recogCard.innerHTML =
+      "<div>好，是 <b>" +
+      ch +
+      "</b>——看它的三千年吧。</div>" +
+      '<div class="recog-actions"><button data-evolve="' +
+      ch +
+      '">看它三千年</button><button data-again>再写一次</button></div>';
+    writeHint.textContent = "认出来了——看看它的三千年吧";
+  } else {
+    recogCard.innerHTML =
+      "<div>好，是 <b>" +
+      ch +
+      "</b>。它的三千年还没画进我们的库——目前收录 30 个字（日 月 山 水 人 木 火 雨 目 口 田 大 牛 羊 女 子 刀 弓 门 舟 云 天 心 手 耳 鸟 土 石 竹 犬）。</div>" +
+      '<div class="recog-actions"><button data-again>再写一次</button></div>';
+    writeHint.textContent = "认出来了——这个字的三千年还没画到";
+  }
+  pluckForChar(ch);
+  bindRecog();
+}
+
 function renderRecogCard(ranked) {
   const top = ranked[0];
   const second = ranked[1];
   const margin = top.score - second.score;
   recogCard.hidden = false;
   const pct = (s) => Math.min(95, Math.round(s * 100));
-  const evolveBtn = (ch, label) =>
-    LIB.includes(ch) ? '<button data-evolve="' + ch + '">' + label + "</button>" : "";
   if (top.score >= 0.65 && margin >= 0.05) {
     if (LIB.includes(top.ch)) {
       recogCard.innerHTML =
@@ -56072,9 +56103,9 @@ function renderRecogCard(ranked) {
         "</b>（" +
         pct(top.score) +
         "%）</div>" +
-        '<div class="recog-actions">' +
-        evolveBtn(top.ch, "看它三千年") +
-        "<button data-again>再写一次</button></div>";
+        '<div class="recog-actions"><button data-evolve="' +
+        top.ch +
+        '">看它三千年</button><button data-again>再写一次</button></div>';
       writeHint.textContent = "认出来了——看看它的三千年吧";
       pluckForChar(top.ch);
     } else {
@@ -56083,33 +56114,21 @@ function renderRecogCard(ranked) {
         top.ch +
         "</b>（" +
         pct(top.score) +
-        "%）。它的三千年还没画进我们的库——目前收录 30 个字（日 月 山 水 人 木 火 雨 目 口 田 大 牛 羊 女 子 刀 弓 门 舟 云 天 心 手 耳 鸟 土 石 竹 犬）。</div>" +
+        "%）。它的三千年还没画进我们的库——目前收录 30 个字。</div>" +
         '<div class="recog-actions"><button data-again>再写一次</button></div>';
       writeHint.textContent = "认出来了——这个字的三千年还没画到";
       pluckForChar(top.ch);
     }
-  } else if (top.score >= 0.5) {
-    recogCard.innerHTML =
-      "<div>有点像 <b>" +
-      top.ch +
-      "</b>（" +
-      pct(top.score) +
-      "%），也像 <b>" +
-      second.ch +
-      "</b>（" +
-      pct(second.score) +
-      "%）</div>" +
-      '<div class="recog-actions">' +
-      evolveBtn(top.ch, "看" + top.ch + "的三千年") +
-      evolveBtn(second.ch, "看" + second.ch + "的三千年") +
-      "<button data-again>再写一次</button></div>";
-    writeHint.textContent = "半认出来了——也可以切到「跟着写」慢慢来";
-    audio.pluck(NOTES.yu);
   } else {
+    const cands = ranked.slice(0, 3);
     recogCard.innerHTML =
-      "<div>没能认出这个字——可以试试写得更工整、或者切到「跟着写」临摹一个字（识别库共近 200 个常用字）。</div>" +
-      '<div class="recog-actions"><button data-again>再写一次</button></div>';
-    writeHint.textContent = "没关系，再写一个";
+      "<div>不太确定——点一下你写的是哪一个（Top-3）：</div>" +
+      '<div class="recog-actions">' +
+      cands
+        .map((c) => '<button data-pick="' + c.ch + '">' + c.ch + "（" + pct(c.score) + "%）</button>")
+        .join("") +
+      "<button data-again>都不是</button></div>";
+    writeHint.textContent = "点选确认，或者切到「跟着写」慢慢来";
     audio.pluck(NOTES.yu);
   }
   bindRecog();
