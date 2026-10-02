@@ -673,6 +673,14 @@ function buildInkCloud() {
 
 function applyWriteCloud() {
   if (activeId !== "write") return;
+  // 懒加载增强识别引擎（12,000+ 常用字，本地模型）
+  if (!hsEngine && !hsLoading) {
+    loadHanScribe().then((ok) => {
+      if (ok && activeId === "write") {
+        writeHint.textContent = "增强识别引擎已就绪——写下任意一个常用字试试";
+      }
+    });
+  }
   if (writeMode === "name") {
     stage.setCloud(ensureCloud("name:prompt", () => buildTextCloud("名字", L.portrait ? 220 : 250, 0.28)));
     return;
@@ -704,7 +712,13 @@ document.getElementById("btn-particle").addEventListener("click", () => {
       bindRecog();
       writeHint.textContent = "一次写一个字，识别会准很多";
     } else {
-      renderRecogCard(recognizeInk());
+      const hs = hsRecognize();
+      if (hs) {
+        renderRecogCardHS(hs);
+      } else {
+        renderRecogCard(recognizeInk());
+        writeHint.textContent = "增强识别引擎还在加载，先用快速识别——稍后可重新粒子化";
+      }
     }
   } else {
     writeHint.textContent = "粒子接住了。点“评分”对照描红看看像不像。";
@@ -989,6 +1003,114 @@ function recognizeInk() {
   });
   ranked.sort((a, b) => b.score - a.score);
   return ranked;
+}
+
+// ---------- HanScribe 增强识别引擎（懒加载；单文件内嵌 / 源码版读 vendor） ----------
+let hsLib = null;
+let hsEngine = null;
+let hsVocab = null;
+let hsLoading = null;
+
+function b64ToU8(b64) {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+
+async function getHsLib() {
+  if (window.HanScribeLib) return window.HanScribeLib;
+  return await import("../vendor/hanscribe.js");
+}
+
+function loadHanScribe() {
+  if (hsLoading) return hsLoading;
+  hsLoading = (async () => {
+    const mod = await getHsLib();
+    let wasmBytes;
+    let modelBuf;
+    if (window.__HS_WASM_B64 && window.__HS_MODEL_B64) {
+      wasmBytes = b64ToU8(window.__HS_WASM_B64).buffer;
+      modelBuf = b64ToU8(window.__HS_MODEL_B64).buffer;
+    } else {
+      const [w, m] = await Promise.all([
+        fetch("vendor/hanscribe-inference.wasm").then((r) => r.arrayBuffer()),
+        fetch("vendor/hanscribe.hzmodel").then((r) => r.arrayBuffer()),
+      ]);
+      wasmBytes = w;
+      modelBuf = m;
+    }
+    const model = mod.parseHzModel(modelBuf);
+    hsEngine = await mod.createWasmEngine(wasmBytes, model.header, model.weights);
+    hsVocab = model.vocab;
+    hsLib = mod;
+    window.__hsReady = true;
+    return true;
+  })().catch(() => false);
+  return hsLoading;
+}
+
+// 用增强引擎识别墨迹；未就绪返回 null（调用方回退旧引擎）
+function hsRecognize() {
+  if (!hsEngine || !hsLib) return null;
+  const strokes = inkStrokes
+    .map((st) => {
+      let t = 0;
+      return st.map((p, i) => {
+        if (i > 0) t += Math.hypot(p.x - st[i - 1].x, p.y - st[i - 1].y) * 12;
+        return [p.x, p.y, t];
+      });
+    })
+    .filter((st) => st.length >= 2);
+  if (!strokes.length) return null;
+  const { data, numSegments } = hsLib.preprocessStrokes(strokes);
+  const res = hsEngine.runInference(data, numSegments, 5);
+  return res.indices.map((idx, k) => ({ ch: hsVocab[idx], score: res.scores[k] }));
+}
+
+// 增强引擎结果卡：高置信直接确认，否则 Top-3 点选
+function renderRecogCardHS(results) {
+  const top = results[0];
+  const second = results[1] || { ch: "", score: 0 };
+  recogCard.hidden = false;
+  const pct = (s) => Math.min(99, Math.round(s * 100));
+  if (top.score >= 0.85 && top.score - second.score >= 0.25) {
+    if (LIB.includes(top.ch)) {
+      recogCard.innerHTML =
+        "<div>粒子接住了你的字，它很像 <b>" +
+        top.ch +
+        "</b>（" +
+        pct(top.score) +
+        "%）</div>" +
+        '<div class="recog-actions"><button data-evolve="' +
+        top.ch +
+        '">看它三千年</button><button data-again>再写一次</button></div>';
+      writeHint.textContent = "认出来了——看看它的三千年吧";
+      pluckForChar(top.ch);
+    } else {
+      recogCard.innerHTML =
+        "<div>认出来了：<b>" +
+        top.ch +
+        "</b>（" +
+        pct(top.score) +
+        "%）。它的三千年还没画进我们的库——目前收录 30 个字。</div>" +
+        '<div class="recog-actions"><button data-again>再写一次</button></div>';
+      writeHint.textContent = "认出来了——这个字的三千年还没画到";
+      pluckForChar(top.ch);
+    }
+  } else {
+    const cands = results.slice(0, 3);
+    recogCard.innerHTML =
+      "<div>点一下你写的是哪一个：</div>" +
+      '<div class="recog-actions">' +
+      cands
+        .map((c) => '<button data-pick="' + c.ch + '">' + c.ch + "（" + pct(c.score) + "%）</button>")
+        .join("") +
+      "<button data-again>都不是</button></div>";
+    writeHint.textContent = "点选确认，或者切到「跟着写」慢慢来";
+    audio.pluck(NOTES.yu);
+  }
+  bindRecog();
 }
 
 // ---- 识别结果卡 ----
@@ -1637,7 +1759,19 @@ if (devRaw) {
           mk([[300, 140], [300, 440]]);
           mk([[230, 270], [370, 270]]);
           inkHasContent = true;
-          if (args[0] === "go") document.getElementById("btn-particle").click();
+          if (args[0] === "hsgo") {
+            // 等增强引擎就绪后再粒子化（测试用）
+            let n = 0;
+            const iv = setInterval(() => {
+              n++;
+              if (window.__hsReady || n > 80) {
+                clearInterval(iv);
+                document.getElementById("btn-particle").click();
+              }
+            }, 250);
+          } else if (args[0] === "go") {
+            document.getElementById("btn-particle").click();
+          }
           if (args[0] === "grade") document.getElementById("btn-grade").click();
           if (args[0] === "evolve") {
             document.getElementById("btn-grade").click();
