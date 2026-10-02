@@ -1,6 +1,6 @@
 // main.js — 叙事控制、构字互动与数据动画
 import { ParticleStage, makeClusterCloud, makeDiskCloud } from "./particles.js";
-import { CHARS, LIB, RECOG, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT, EVO_CHARS, evoAvailable, STROKES } from "./glyphs.js";
+import { CHARS, LIB, RECOG, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT, EVO_CHARS, EVO_COUNT, evoAvailable, evoFontOk, ensureEvo, STROKES } from "./glyphs.js";
 import { RECOG_STROKES } from "./stroke-counts.js";
 import { AmbientAudio, NOTES } from "./audio.js";
 
@@ -457,13 +457,13 @@ LIB.forEach((ch) => {
 // 扩展字库选择器（708 字）
 const libMoreBtn = document.createElement("button");
 libMoreBtn.className = "lib-chip lib-more";
-libMoreBtn.textContent = "更多字 " + EVO_CHARS.length + " ›";
+libMoreBtn.textContent = "更多字 " + EVO_COUNT.toLocaleString("zh-CN") + " ›";
 libChipsEl.appendChild(libMoreBtn);
 
 const libOverlay = document.getElementById("lib-overlay");
 const libGridEl = document.getElementById("lib-grid");
 const libSearchEl = document.getElementById("lib-search");
-document.getElementById("lib-count").textContent = EVO_CHARS.length + " 字";
+document.getElementById("lib-count").textContent = EVO_COUNT.toLocaleString("zh-CN") + " 字";
 libMoreBtn.addEventListener("click", () => {
   libOverlay.classList.add("open");
   libOverlay.setAttribute("aria-hidden", "false");
@@ -484,22 +484,39 @@ window.addEventListener("keydown", (e) => {
 });
 libSearchEl.addEventListener("input", () => renderLibGrid(libSearchEl.value.trim()));
 
-function renderLibGrid(q) {
+let libGridLimit = 480;
+function renderLibGrid(q, more) {
+  if (!more) libGridLimit = 480;
   let html = "";
   let n = 0;
+  let total = 0;
   for (const ch of EVO_CHARS) {
     if (q && ch !== q && !ch.includes(q)) continue;
-    const seq = seqOf(ch) || [];
-    const ancient = seq.filter((s) => s !== "regular");
+    const ancient = evoAvailable(ch) || [];
+    if (!ancient.length) continue;
+    total++;
+    if (n >= libGridLimit) continue;
     const title = ancient.map((s) => STAGE_NAMES[s]).join(" · ");
-    const early = ancient[0] === "oracle" ? "" : " no-oracle";
-    html += '<button class="lib-cell' + early + '" data-ch="' + ch + '" title="' + title + '">' + ch + "</button>";
-    if (++n >= 760) break;
+    let cls = "lib-cell";
+    if (ancient[0] !== "oracle") cls += " no-oracle";
+    if (!evoFontOk(ch)) cls += " no-font";
+    html += '<button class="' + cls + '" data-ch="' + ch + '" title="' + title + '">' + ch + "</button>";
+    n++;
+  }
+  if (total > n) {
+    html += '<button class="lib-cell lib-loadmore" id="lib-loadmore">显示更多（还有 ' + (total - n) + " 字）</button>";
   }
   libGridEl.innerHTML = html || '<p class="lib-empty">没有找到这个字</p>';
+  const lm = document.getElementById("lib-loadmore");
+  if (lm) {
+    lm.addEventListener("click", () => {
+      libGridLimit += 480;
+      renderLibGrid(q, true);
+    });
+  }
 }
 libGridEl.addEventListener("click", (e) => {
-  const b = e.target.closest(".lib-cell");
+  const b = e.target.closest(".lib-cell[data-ch]");
   if (!b) return;
   closeLibOverlay();
   loadLibChar(b.dataset.ch, true);
@@ -521,13 +538,18 @@ function updateTimeNote(seq) {
     timeNoteEl.classList.remove("show");
     return;
   }
-  let note = "收录 " + ancient.length + " 个历史阶段：" + ancient.map((s) => STAGE_NAMES[s]).join(" → ");
-  if (!ancient.includes("oracle")) note += "。甲骨文暂未见此字——有的字出生得晚，这也是汉字的故事。";
+  let note;
+  if (ancient.length === 1) {
+    note = "目前仅见「" + STAGE_NAMES[ancient[0]] + "」形态——更早的字形还没有被找到。";
+  } else {
+    note = "收录 " + ancient.length + " 个历史阶段：" + ancient.map((s) => STAGE_NAMES[s]).join(" → ");
+    if (!ancient.includes("oracle")) note += "。甲骨文暂未见此字——有的字出生得晚，这也是汉字的故事。";
+  }
   timeNoteEl.textContent = note;
   timeNoteEl.classList.add("show");
 }
 
-function loadLibChar(ch, animate) {
+async function loadLibChar(ch, animate) {
   libChar = ch;
   syncLibChips();
   const seq = seqOf(ch) || STAGES;
@@ -536,6 +558,13 @@ function loadLibChar(ch, animate) {
   libProgress = 0;
   renderTimeLabels(seq);
   updateTimeNote(seq);
+  if (!STROKES[ch] && evoAvailable(ch)) {
+    timeNoteEl.textContent = "字形加载中…";
+    timeNoteEl.classList.add("show");
+    await ensureEvo(ch);
+    if (libChar !== ch) return;
+    updateTimeNote(seq);
+  }
   if (activeId === "timeline") showTimeline(animate);
 }
 
@@ -551,6 +580,12 @@ function timelineCloudKey(ch, stageName) {
 
 function showTimeline(animate) {
   const seq = seqOf(libChar) || STAGES;
+  if (!STROKES[libChar] && evoAvailable(libChar)) {
+    ensureEvo(libChar).then(() => {
+      if (activeId === "timeline") showTimeline(animate);
+    });
+    return;
+  }
   const i = Math.min(seq.length - 2, Math.floor(libProgress));
   const t = Math.min(1, libProgress - i);
   const keyA = timelineCloudKey(libChar, seq[i]);
@@ -1353,7 +1388,7 @@ btnGrade.addEventListener("click", () => {
 
 // ---- 联动：跳一字千年并自动推演 + 考据卡 ----
 // fromKey 可选："write:user"（手写笔迹）或 "name:user"（名字图）——先原地长成甲骨文，再走完五体
-function showEvolution(ch, fromKey) {
+async function showEvolution(ch, fromKey) {
   const seq = seqOf(ch);
   if (!seq) {
     const hint = document.getElementById("write-hint");
@@ -1370,6 +1405,13 @@ function showEvolution(ch, fromKey) {
   const idx = sections.findIndex((s) => s.id === "timeline");
   if (idx >= 0) goTo(idx);
   clearInterval(evolveTimer);
+  if (!STROKES[ch] && evoAvailable(ch)) {
+    timeNoteEl.textContent = "字形加载中…";
+    timeNoteEl.classList.add("show");
+    await ensureEvo(ch);
+    if (libChar !== ch) return;
+    updateTimeNote(seq);
+  }
   const firstKey = timelineCloudKey(ch, seq[0]);
   const maxV = (seq.length - 1) * 100;
   const startPlay = () => {

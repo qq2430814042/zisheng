@@ -5,11 +5,12 @@
   python tools/build_evo.py --dataset <dataset.bin> [--sheet out.png] [--limit N]
 
 输出:
-  js/evo-data.js   (EVO_EXTRA: 每个字的甲骨/金文/简帛/小篆/隶书骨架笔画，方向数字编码)
+  js/evo-index.js              全量索引（字符表 + 阶段/字体位图，base64 字节）
+  js/evo-data/shard-NNNN.json  分片字形数据（每片 256 字，方向数字编码）
 
 依赖: pip install zstandard pillow numpy fonttools
 """
-import sys, os, math, json, argparse, collections, random
+import sys, os, math, json, argparse, collections, random, base64
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ced_reader import CEDReader  # noqa: E402
@@ -378,20 +379,23 @@ def render_sheet(gs, chars, out):
     print("sheet:", out, sheet.size)
 
 
+SHARD_SIZE = 256
+STAGE_BIT = {"O": 0, "J": 1, "W": 2, "Z": 3, "L": 4}
+FONT_BIT = 5
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default=r"C:\Users\roman\AppData\Local\Temp\opencode\ced\package\dataset.bin")
-    ap.add_argument("--out", default=os.path.join(ROOT, "js", "evo-data.js"))
+    ap.add_argument("--outdir", default=os.path.join(ROOT, "js"))
+    ap.add_argument("--font", default=r"C:\Users\roman\AppData\Local\Temp\opencode\font\LXGWWenKai-Regular.ttf")
     ap.add_argument("--sheet", default=None)
-    ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--sheet-chars", default="")
+    ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
 
     reader = CEDReader(args.dataset)
     gs = GlyphSkel(reader)
-    target = sorted(load_font_chars() | load_app_chars())
-    if args.limit:
-        target = target[:args.limit]
 
     if args.sheet:
         if args.sheet_chars:
@@ -401,44 +405,108 @@ def main():
         render_sheet(gs, chars, args.sheet)
         return
 
-    data = {}
+    covered = set()
+    try:
+        from fontTools.ttLib import TTFont
+        cmap = TTFont(args.font, lazy=True).getBestCmap()
+        covered = set(chr(c) for c in cmap)
+        print("font coverage:", len(covered))
+    except Exception as e:
+        print("font coverage unavailable:", e)
+
+    prev = load_font_chars() | load_app_chars()
+
+    def stages_avail(ch):
+        cid = gs.rev.get(ch)
+        if not cid:
+            return set()
+        return set(k.split("/")[-1][:1] for k in gs.by_id.get(cid, [])) & set("OJWZL")
+
+    info = []
+    for ch in set(reader.chars.values()):
+        st = stages_avail(ch)
+        if st:
+            info.append((ch, st))
+    info.sort(key=lambda t: (0 if t[0] in prev else 1, -len(t[1]), ord(t[0])))
+    if args.limit:
+        info = info[:args.limit]
+    chars = [ch for ch, _ in info]
+    print("target chars:", len(chars))
+
+    bits = bytearray()
+    for ch, st in info:
+        b = 0
+        for p, off in STAGE_BIT.items():
+            if p in st:
+                b |= 1 << off
+        if ch in covered:
+            b |= 1 << FONT_BIT
+        bits.append(b)
+    b64 = base64.b64encode(bytes(bits)).decode()
+    idx_js = "\n".join([
+        "// 扩展演变字库索引（由 tools/build_evo.py 生成，勿手改）",
+        "// 数据来源：character-evolution-dataset-1bit (MIT, © Leon Si) 甲骨/金文/简帛/小篆/隶书字形",
+        "// EVO_BITS：每字 1 字节（bit0-4 = 甲骨/金文/简帛/小篆/隶书，bit5 = 内嵌字体覆盖）",
+        "export const EVO_CHARS = " + json.dumps("".join(chars), ensure_ascii=False) + ";",
+        "export const EVO_COUNT = " + str(len(chars)) + ";",
+        'export const EVO_BITS = "' + b64 + '";',
+        "export const EVO_SHARD_SIZE = " + str(SHARD_SIZE) + ";",
+        "export const EVO_SHARD_COUNT = " + str((len(chars) + SHARD_SIZE - 1) // SHARD_SIZE) + ";",
+    ])
+    os.makedirs(os.path.join(args.outdir, "evo-data"), exist_ok=True)
+    idx_path = os.path.join(args.outdir, "evo-index.js")
+    open(idx_path, "w", encoding="utf-8").write(idx_js)
+    print("index written:", idx_path, os.path.getsize(idx_path), "bytes")
+
     stats = collections.Counter()
     picked_log = {}
-    for n, ch in enumerate(target):
+    shards = collections.defaultdict(dict)
+    actual = {}
+    for n, ch in enumerate(chars):
         stages, picks = build_char(gs, ch)
         if not stages:
             stats["none"] += 1
+            actual[ch] = set()
             continue
-        data[ch] = stages
+        shards[n // SHARD_SIZE][ch] = stages
+        actual[ch] = set(stages.keys())
         picked_log[ch] = picks
         for st in stages:
             stats[st] += 1
         stats["chars"] += 1
-        if n % 100 == 0:
-            print(n, "/", len(target), ch, flush=True)
+        if n % 200 == 0:
+            print(n, "/", len(chars), flush=True)
 
-    lines = []
-    lines.append("// 扩展演变字库数据（由 tools/build_evo.py 生成，勿手改）")
-    lines.append("// 数据来源：character-evolution-dataset-1bit (MIT, © Leon Si) —— 甲骨/金文/简帛/小篆/隶书字形")
-    lines.append("// 编码：每阶段为若干路径，'|' 分隔；路径格式 x,y:0123...（起点坐标 0-192 + 八方向步进 0=N 顺时针）")
-    lines.append("export const EVO_EXTRA = {")
-    for ch, stages in data.items():
-        parts = []
-        for st in ["oracle", "bronze", "bamboo-silk", "seal", "clerical"]:
-            if st in stages:
-                parts.append('"%s":"%s"' % (st, stages[st]))
-        lines.append('"%s":{%s},' % (ch, ",".join(parts)))
-    lines.append("};")
-    lines.append("export const EVO_CHARS = " + json.dumps(list(data.keys()), ensure_ascii=False) + ";")
-    js = "\n".join(lines)
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    open(args.out, "w", encoding="utf-8").write(js)
-    size = os.path.getsize(args.out)
+    # 按实际生成结果回写索引位（避免"索引说有小篆、实际被过滤"的不一致）
+    bits2 = bytearray()
+    changed = 0
+    for i, (ch, st) in enumerate(info):
+        b = (bits[i] & 0x20)  # 保留字体覆盖位
+        for si, key in enumerate(["oracle", "bronze", "bamboo-silk", "seal", "clerical"]):
+            if key in actual.get(ch, set()):
+                b |= 1 << si
+        if b != bits[i]:
+            changed += 1
+        bits2.append(b)
+    b64b = base64.b64encode(bytes(bits2)).decode()
+    idx_js = idx_js.replace('export const EVO_BITS = "' + b64 + '";', 'export const EVO_BITS = "' + b64b + '";')
+    real_count = sum(1 for ch in chars if actual.get(ch))
+    idx_js = idx_js.replace("export const EVO_COUNT = " + str(len(chars)) + ";", "export const EVO_COUNT = " + str(real_count) + ";")
+    open(idx_path, "w", encoding="utf-8").write(idx_js)
+    print("index bits refreshed, changed:", changed)
+
+    total = 0
+    for si in sorted(shards):
+        p = os.path.join(args.outdir, "evo-data", "shard-%04d.json" % si)
+        js = json.dumps(shards[si], ensure_ascii=False, separators=(",", ":"))
+        assert "</" not in js, "unexpected </ in shard"
+        open(p, "w", encoding="utf-8").write(js)
+        total += len(js.encode("utf-8"))
+    print("shards:", len(shards), "%.1f MB" % (total / 1048576))
     print("chars:", stats["chars"], "none:", stats["none"])
     for st in ["oracle", "bronze", "bamboo-silk", "seal", "clerical"]:
         print("  ", st, stats[st])
-    print("written:", args.out, "%.2f MB" % (size / 1048576))
-    json.dump(picked_log, open(os.path.join(os.path.dirname(args.out), "..", "assets", "dev", "evo_picks.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=0)
+    json.dump(picked_log, open(os.path.join(ROOT, "assets", "dev", "evo_picks_all.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=0)
 
 
 if __name__ == "__main__":

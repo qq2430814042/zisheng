@@ -1,6 +1,6 @@
 // glyphs.js — 字形数据与栅格化工具
-// 精选 30 字为手绘矢量笔画（100x100 坐标系）；扩展字库由开源古文字数据集骨架化生成
-import { EVO_EXTRA, EVO_CHARS } from "./evo-data.js";
+// 精选 30 字为手绘矢量笔画（100x100 坐标系）；扩展字库由开源古文字数据集骨架化生成（分片懒加载）
+import { EVO_CHARS, EVO_COUNT, EVO_BITS, EVO_SHARD_SIZE } from "./evo-index.js";
 
 export const CHARS = ["日", "月", "山", "水", "人"];
 export const LIB = [
@@ -478,10 +478,6 @@ export function drawGlyph(ctx, ch, stage, cx, cy, size) {
     return;
   }
   let data = STROKES[ch] && STROKES[ch][stage];
-  if (!data && EVO_EXTRA[ch]) {
-    ensureEvo(ch);
-    data = STROKES[ch] && STROKES[ch][stage];
-  }
   if (!data) return;
   ctx.save();
   ctx.translate(cx - size / 2, cy - size / 2);
@@ -495,10 +491,23 @@ export function drawGlyph(ctx, ch, stage, cx, cy, size) {
   ctx.restore();
 }
 
-// ---------- 扩展字库：方向数字编码按需解码并并入 STROKES ----------
-// 精选 30 字的手绘数据优先，缺的阶段才用开源数据集骨架补齐
+// ---------- 扩展字库：索引 + 分片懒加载 + 方向数字解码 ----------
+// 精选 30 字的手绘数据优先；扩展字在首次使用时异步加载所在分片并解码
 const EVO_DIRS = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
-const EVO_DECODED = new Set();
+const EVO_STAGE_ORDER = ["oracle", "bronze", "bamboo-silk", "seal", "clerical"];
+
+const EVO_INDEX_MAP = new Map();
+{
+  let i = 0;
+  for (const ch of EVO_CHARS) EVO_INDEX_MAP.set(ch, i++);
+}
+const EVO_BYTES = (() => {
+  const bin = atob(EVO_BITS);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+})();
+
 function decodeEvoStage(enc) {
   return enc.split("|").map((p) => {
     const i = p.indexOf(":");
@@ -513,18 +522,61 @@ function decodeEvoStage(enc) {
     return d;
   });
 }
-function ensureEvo(ch) {
-  const stages = EVO_EXTRA[ch];
-  if (!stages || EVO_DECODED.has(ch)) return;
-  EVO_DECODED.add(ch);
+
+const evoShardCache = new Map();
+const EVO_SHARD_CACHE_MAX = 16;
+
+async function loadEvoShard(i) {
+  if (evoShardCache.has(i)) {
+    const v = evoShardCache.get(i);
+    evoShardCache.delete(i);
+    evoShardCache.set(i, v);
+    return v;
+  }
+  let data = {};
+  if (window.__SINGLE_FILE__) {
+    const el = document.getElementById("evo-shard-" + i);
+    if (el) data = JSON.parse(el.textContent);
+  } else {
+    const r = await fetch("js/evo-data/shard-" + String(i).padStart(4, "0") + ".json");
+    if (r.ok) data = await r.json();
+  }
+  evoShardCache.set(i, data);
+  while (evoShardCache.size > EVO_SHARD_CACHE_MAX) {
+    evoShardCache.delete(evoShardCache.keys().next().value);
+  }
+  return data;
+}
+
+export async function ensureEvo(ch) {
+  if (STROKES[ch]) return;
+  const idx = EVO_INDEX_MAP.get(ch);
+  if (idx === undefined) return;
+  const shard = await loadEvoShard(Math.floor(idx / EVO_SHARD_SIZE));
+  const stages = shard[ch];
+  if (!stages) return;
   const slot = STROKES[ch] || (STROKES[ch] = {});
   for (const st in stages) {
     if (!slot[st]) slot[st] = decodeEvoStage(stages[st]);
   }
 }
-// 该字在数据集中收录了哪些古代阶段（不触发解码）
+
+// 该字在数据集中收录了哪些古代阶段（只读索引，不触发加载）
 export function evoAvailable(ch) {
-  const e = EVO_EXTRA[ch];
-  return e ? Object.keys(e) : null;
+  const i = EVO_INDEX_MAP.get(ch);
+  if (i === undefined) return null;
+  const b = EVO_BYTES[i];
+  const out = [];
+  for (let s = 0; s < EVO_STAGE_ORDER.length; s++) {
+    if (b & (1 << s)) out.push(EVO_STAGE_ORDER[s]);
+  }
+  return out;
 }
-export { EVO_CHARS };
+
+// 该字是否被内嵌扩展字体覆盖（否则回退系统字体）
+export function evoFontOk(ch) {
+  const i = EVO_INDEX_MAP.get(ch);
+  return i === undefined ? false : ((EVO_BYTES[i] >> 5) & 1) === 1;
+}
+
+export { EVO_CHARS, EVO_COUNT };
