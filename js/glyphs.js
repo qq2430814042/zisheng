@@ -525,6 +525,7 @@ function decodeEvoStage(enc) {
 
 const evoShardCache = new Map();
 const EVO_SHARD_CACHE_MAX = 16;
+const evoAttempted = new Set();
 
 async function loadEvoShard(i) {
   if (evoShardCache.has(i)) {
@@ -550,8 +551,10 @@ async function loadEvoShard(i) {
 
 export async function ensureEvo(ch) {
   if (STROKES[ch]) return;
+  if (evoAttempted.has(ch)) return;
   const idx = EVO_INDEX_MAP.get(ch);
   if (idx === undefined) return;
+  evoAttempted.add(ch);
   const shard = await loadEvoShard(Math.floor(idx / EVO_SHARD_SIZE));
   const stages = shard[ch];
   if (!stages) return;
@@ -570,7 +573,7 @@ export function evoAvailable(ch) {
   for (let s = 0; s < EVO_STAGE_ORDER.length; s++) {
     if (b & (1 << s)) out.push(EVO_STAGE_ORDER[s]);
   }
-  return out;
+  return out.length ? out : null;
 }
 
 // 该字是否被内嵌扩展字体覆盖（否则回退系统字体）

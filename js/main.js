@@ -459,7 +459,7 @@ LIB.forEach((ch) => {
   libChipsEl.appendChild(b);
 });
 
-// 扩展字库选择器（708 字）
+// 扩展字库选择器（14,873 字）
 const libMoreBtn = document.createElement("button");
 libMoreBtn.className = "lib-chip lib-more";
 libMoreBtn.textContent = "更多字 " + EVO_COUNT.toLocaleString("zh-CN") + " ›";
@@ -570,6 +570,8 @@ async function loadLibChar(ch, animate) {
     if (libChar !== ch) return;
     updateTimeNote(seq);
   }
+  await document.fonts.load('64px "ZiShengKai"', ch).catch(() => {});
+  if (libChar !== ch) return;
   if (activeId === "timeline") showTimeline(animate);
 }
 
@@ -587,7 +589,12 @@ function showTimeline(animate) {
   const seq = seqOf(libChar) || STAGES;
   if (!STROKES[libChar] && evoAvailable(libChar)) {
     ensureEvo(libChar).then(() => {
-      if (activeId === "timeline") showTimeline(animate);
+      if (STROKES[libChar]) {
+        if (activeId === "timeline") showTimeline(animate);
+      } else {
+        timeNoteEl.textContent = "字形数据加载失败——请检查网络后刷新重试";
+        timeNoteEl.classList.add("show");
+      }
     });
     return;
   }
@@ -951,12 +958,14 @@ guideRandomBtn.addEventListener("click", () => {
 });
 
 // ---- 名字图：生成与保存 ----
-nameGenerateBtn.addEventListener("click", () => {
+nameGenerateBtn.addEventListener("click", async () => {
   const name = nameInput.value.trim().replace(/\s+/g, "").slice(0, 4);
   if (!name) {
     writeHint.textContent = "先输入名字（2–4 字）";
     return;
   }
+  writeHint.textContent = "正在生成…";
+  await document.fonts.load('64px "ZiShengKai"', name).catch(() => {});
   const size = name.length >= 4 ? 200 : name.length === 3 ? 240 : 280;
   stage.addCloud("name:user", buildTextCloud(name, size, 0.5));
   stage.setCloud("name:user", 1.5);
@@ -1417,6 +1426,8 @@ async function showEvolution(ch, fromKey) {
     if (libChar !== ch) return;
     updateTimeNote(seq);
   }
+  await document.fonts.load('64px "ZiShengKai"', ch).catch(() => {});
+  if (libChar !== ch) return;
   const firstKey = timelineCloudKey(ch, seq[0]);
   const maxV = (seq.length - 1) * 100;
   const startPlay = () => {
@@ -1457,8 +1468,11 @@ function showEtyCard(ch) {
     document.getElementById("ety-method").textContent = "字形流变";
     document.getElementById("ety-meaning").textContent =
       ancient.length && STAGE_ERA[ancient[0]] ? "可见最早形态：" + STAGE_NAMES[ancient[0]] + " · " + STAGE_ERA[ancient[0]] : "";
-    let note = "该字共收录 " + ancient.length + " 个历史字形（甲骨—楷书）。";
-    if (!ancient.includes("oracle")) note += "甲骨文暂未见此字——它出现得比较晚。";
+    let note =
+      ancient.length === 1
+        ? "该字目前仅见「" + STAGE_NAMES[ancient[0]] + "」形态，更早的字形还没有被找到。"
+        : "该字共收录 " + ancient.length + " 个历史字形。";
+    if (ancient.length > 1 && !ancient.includes("oracle")) note += "甲骨文暂未见此字——它出现得比较晚。";
     note += "精选 30 字附完整释读考据；扩展字形来自开源古文字数据集。";
     document.getElementById("ety-note").textContent = note;
   }
@@ -1869,6 +1883,14 @@ if (devRaw) {
         window.__lastKey = k;
         if (stage.clouds[k]) stage.setInitialCloud(k);
       };
+      setInterval(() => {
+        document.title =
+          (window.__lastKey || "-") +
+          " | ch:" +
+          libChar +
+          " | font:" +
+          document.fonts.check('64px "ZiShengKai"', libChar);
+      }, 500);
       for (const s of sections) {
         const el = document.getElementById(s.id);
         if (s.id !== target) el.style.display = "none";
