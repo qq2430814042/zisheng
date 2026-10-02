@@ -1,6 +1,6 @@
 // main.js — 叙事控制、构字互动与数据动画
 import { ParticleStage, makeClusterCloud, makeDiskCloud } from "./particles.js";
-import { CHARS, LIB, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT } from "./glyphs.js";
+import { CHARS, LIB, RECOG, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT } from "./glyphs.js";
 import { AmbientAudio, NOTES } from "./audio.js";
 
 const STAGE_NOTE = {
@@ -917,14 +917,20 @@ function computeFeatures(drawFn, W, H) {
   return { cov, grad };
 }
 
+// 模板：识别面 RECOG（172 字），每字 3 个角度增强（±4°+0°），提升容错
+const TEMPLATE_ANGLES = [-4, 0, 4];
 const TEMPLATES = {};
-LIB.forEach((ch) => {
-  TEMPLATES[ch] = computeFeatures((ctx, W, H) => {
-    ctx.font = Math.round(H * 0.82) + "px " + FONT_STACK;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(ch, W / 2, H / 2 + H * 0.01);
-  }, 72, 72);
+RECOG.forEach((ch) => {
+  TEMPLATES[ch] = TEMPLATE_ANGLES.map((deg) =>
+    computeFeatures((ctx, W, H) => {
+      ctx.font = Math.round(H * 0.82) + "px " + FONT_STACK;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.translate(W / 2, H / 2);
+      ctx.rotate((deg * Math.PI) / 180);
+      ctx.fillText(ch, 0, H * 0.01);
+    }, 72, 72)
+  );
 });
 
 function inkFeatures() {
@@ -967,7 +973,14 @@ function similarity(f, t) {
 
 function recognizeInk() {
   const f = inkFeatures();
-  const ranked = LIB.map((ch) => ({ ch, score: similarity(f, TEMPLATES[ch]) }));
+  const ranked = RECOG.map((ch) => {
+    let best = 0;
+    for (const t of TEMPLATES[ch]) {
+      const s = similarity(f, t);
+      if (s > best) best = s;
+    }
+    return { ch, score: best };
+  });
   ranked.sort((a, b) => b.score - a.score);
   return ranked;
 }
@@ -994,18 +1007,32 @@ function renderRecogCard(ranked) {
   const margin = top.score - second.score;
   recogCard.hidden = false;
   const pct = (s) => Math.min(95, Math.round(s * 100));
+  const evolveBtn = (ch, label) =>
+    LIB.includes(ch) ? '<button data-evolve="' + ch + '">' + label + "</button>" : "";
   if (top.score >= 0.65 && margin >= 0.05) {
-    recogCard.innerHTML =
-      "<div>粒子接住了你的字，它很像 <b>" +
-      top.ch +
-      "</b>（" +
-      pct(top.score) +
-      "%）</div>" +
-      '<div class="recog-actions"><button data-evolve="' +
-      top.ch +
-      '">看它三千年</button><button data-again>再写一次</button></div>';
-    writeHint.textContent = "认出来了——看看它的三千年吧";
-    pluckForChar(top.ch);
+    if (LIB.includes(top.ch)) {
+      recogCard.innerHTML =
+        "<div>粒子接住了你的字，它很像 <b>" +
+        top.ch +
+        "</b>（" +
+        pct(top.score) +
+        "%）</div>" +
+        '<div class="recog-actions">' +
+        evolveBtn(top.ch, "看它三千年") +
+        "<button data-again>再写一次</button></div>";
+      writeHint.textContent = "认出来了——看看它的三千年吧";
+      pluckForChar(top.ch);
+    } else {
+      recogCard.innerHTML =
+        "<div>认出来了：<b>" +
+        top.ch +
+        "</b>（" +
+        pct(top.score) +
+        "%）。它的三千年还没画进我们的库——目前收录 30 个字（日 月 山 水 人 木 火 雨 目 口 田 大 牛 羊 女 子 刀 弓 门 舟 云 天 心 手 耳 鸟 土 石 竹 犬）。</div>" +
+        '<div class="recog-actions"><button data-again>再写一次</button></div>';
+      writeHint.textContent = "认出来了——这个字的三千年还没画到";
+      pluckForChar(top.ch);
+    }
   } else if (top.score >= 0.5) {
     recogCard.innerHTML =
       "<div>有点像 <b>" +
@@ -1017,20 +1044,15 @@ function renderRecogCard(ranked) {
       "</b>（" +
       pct(second.score) +
       "%）</div>" +
-      '<div class="recog-actions"><button data-evolve="' +
-      top.ch +
-      '">看' +
-      top.ch +
-      '的三千年</button><button data-evolve="' +
-      second.ch +
-      '">看' +
-      second.ch +
-      '的三千年</button><button data-again>再写一次</button></div>';
+      '<div class="recog-actions">' +
+      evolveBtn(top.ch, "看" + top.ch + "的三千年") +
+      evolveBtn(second.ch, "看" + second.ch + "的三千年") +
+      "<button data-again>再写一次</button></div>";
     writeHint.textContent = "半认出来了——也可以切到「跟着写」慢慢来";
     audio.pluck(NOTES.yu);
   } else {
     recogCard.innerHTML =
-      "<div>没能认出这个字——它可能不在我们的 30 字库里（目前收录：日月山水人木火雨目口田大牛羊女子刀弓门舟云天心手耳鸟土石竹犬）。也可以切到「跟着写」临摹一个字。</div>" +
+      "<div>没能认出这个字——可以试试写得更工整、或者切到「跟着写」临摹一个字（识别库共近 200 个常用字）。</div>" +
       '<div class="recog-actions"><button data-again>再写一次</button></div>';
     writeHint.textContent = "没关系，再写一个";
     audio.pluck(NOTES.yu);
@@ -1176,7 +1198,7 @@ function templateSim(a, b) {
 
 function makeShapeQuestion(ch) {
   const ranked = LIB.filter((c) => c !== ch)
-    .map((c) => ({ c, s: templateSim(TEMPLATES[ch], TEMPLATES[c]) }))
+    .map((c) => ({ c, s: templateSim(TEMPLATES[ch][1], TEMPLATES[c][1]) }))
     .sort((x, y) => y.s - x.s);
   return { ch, opts: shuffleArr([ch, ...ranked.slice(0, 3).map((o) => o.c)]) };
 }
@@ -1351,6 +1373,10 @@ const COMBO = {
   人木: ["休", "人倚木为休——一个人靠在树旁，就是休息。"],
   女子: ["好", "女子为好——有孩子、有依靠，便是美好。"],
   日日: ["昌", "双日为昌——两个太阳，寓意光明与昌盛。"],
+  木子: ["李", "木子为李——《说文》说“从木，子声”；本义是李子，后来成了姓氏。"],
+  月月: ["朋", "双月为朋——两月相随，像并肩同行的朋友。"],
+  人人: ["从", "二人为从——一个跟着一个，就是跟从。"],
+  人子: ["仔", "人旁有子——“仔”指幼小的孩子。"],
 };
 
 let selection = [];
