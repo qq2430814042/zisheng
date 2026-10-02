@@ -131,18 +131,77 @@ const sections = [
 const eraName = document.getElementById("era-name");
 const mainEl = document.querySelector("main");
 const navEl = document.getElementById("nav");
-const progressEl = document.querySelector("#progress i");
 const tocItems = [];
+const drawerItems = [];
+
+// 桌面目录：ul/li/真实锚点，五体主线与互动/说明分两组
+const navUl = document.createElement("ul");
+navEl.appendChild(navUl);
+const drawerListEl = document.getElementById("toc-list-mobile");
 
 sections.forEach((s, i) => {
+  if (i === 6) {
+    const sep = document.createElement("li");
+    sep.className = "toc-sep";
+    sep.setAttribute("aria-hidden", "true");
+    navUl.appendChild(sep);
+  }
+  const li = document.createElement("li");
   const a = document.createElement("a");
   a.className = "toc-item";
-  a.href = "javascript:void(0)";
-  a.innerHTML = "<span>" + s.label + "</span>";
+  a.href = "#" + s.id;
+  a.dataset.tier = i <= 5 ? "1" : "2";
   a.title = s.label;
-  a.addEventListener("click", () => goTo(i));
-  navEl.appendChild(a);
+  a.innerHTML = '<span class="toc-label">' + s.label + '</span><i class="toc-tick" aria-hidden="true"></i>';
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    goTo(i);
+  });
+  li.appendChild(a);
+  navUl.appendChild(li);
   tocItems.push(a);
+
+  const dli = document.createElement("li");
+  const da = document.createElement("a");
+  da.href = "#" + s.id;
+  da.innerHTML = "<span>" + s.label + '</span><i class="num">' + String(i + 1).padStart(2, "0") + "</i>";
+  da.addEventListener("click", (e) => {
+    e.preventDefault();
+    goTo(i);
+    closeDrawer();
+  });
+  dli.appendChild(da);
+  drawerListEl.appendChild(dli);
+  drawerItems.push(da);
+});
+
+const tocPosEl = document.createElement("div");
+tocPosEl.className = "toc-pos";
+navEl.appendChild(tocPosEl);
+
+// 移动端目录抽屉
+const tocBtn = document.getElementById("toc-btn");
+const tocDrawer = document.getElementById("toc-drawer");
+const tocBackdrop = document.getElementById("toc-backdrop");
+const tocClose = document.getElementById("toc-close");
+
+function openDrawer() {
+  tocDrawer.classList.add("open");
+  tocBackdrop.classList.add("show");
+  tocBtn.setAttribute("aria-expanded", "true");
+  tocDrawer.setAttribute("aria-hidden", "false");
+}
+function closeDrawer() {
+  tocDrawer.classList.remove("open");
+  tocBackdrop.classList.remove("show");
+  tocBtn.setAttribute("aria-expanded", "false");
+  tocDrawer.setAttribute("aria-hidden", "true");
+}
+tocBtn.addEventListener("click", openDrawer);
+tocClose.addEventListener("click", closeDrawer);
+tocBackdrop.addEventListener("click", closeDrawer);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDrawer();
 });
 
 // 声音
@@ -180,7 +239,14 @@ function applySection(sec) {
     stage.setCloud(sec.cloud);
   }
   eraName.textContent = sec.era;
-  tocItems.forEach((el, i) => el.classList.toggle("active", sections[i].id === sec.id));
+  const syncCurrent = (el, i) => {
+    const on = sections[i].id === sec.id;
+    el.classList.toggle("active", on);
+    if (on) el.setAttribute("aria-current", "page");
+    else el.removeAttribute("aria-current");
+  };
+  tocItems.forEach(syncCurrent);
+  drawerItems.forEach(syncCurrent);
   const noteKey = sec.id.startsWith("act-") ? sec.id.slice(4) : sec.id;
   if (STAGE_NOTE[noteKey]) audio.pluck(STAGE_NOTE[noteKey]);
 }
@@ -192,9 +258,16 @@ function goTo(i, force = false) {
   if (i === currentIndex && !force && activeId !== null) return;
   currentIndex = i;
   mainEl.style.transform = "translateX(" + -i * 100 + "vw)";
-  progressEl.style.width = (((i + 1) / sections.length) * 100).toFixed(1) + "%";
   applySection(sections[i]);
+  tocPosEl.textContent = String(i + 1).padStart(2, "0") + " / " + String(sections.length).padStart(2, "0");
+  const hash = "#" + sections[i].id;
+  if (location.hash !== hash) history.replaceState(null, "", hash);
 }
+
+window.addEventListener("hashchange", () => {
+  const idx = sections.findIndex((s) => s.id === location.hash.slice(1));
+  if (idx >= 0 && idx !== currentIndex) goTo(idx, true);
+});
 
 let wheelAcc = 0;
 let wheelLockUntil = 0;
@@ -648,7 +721,43 @@ stage.setColor(sections[0].color, 0.01);
 stage.setBackground(sections[0].bg);
 stage.setOpacity(sections[0].opacity);
 eraName.textContent = sections[0].era;
-goTo(0, true);
+
+// 深链接：刷新/分享可直达某一章（#act-seal 等）；延迟到模块初始化完成后执行，避免 TDZ
+let startIdx = sections.findIndex((s) => s.id === location.hash.slice(1));
+if (startIdx < 0) startIdx = 0;
+setTimeout(() => {
+  // 深链接会触发浏览器原生锚点滚动（叠加在 transform 上导致串屏），先复位
+  window.scrollTo(0, 0);
+  document.documentElement.scrollLeft = 0;
+  document.body.scrollLeft = 0;
+  if (startIdx > 0) {
+    mainEl.style.transition = "none";
+    goTo(startIdx, true);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        mainEl.style.transition = "";
+      });
+    });
+  } else {
+    goTo(0, true);
+  }
+}, 0);
+window.addEventListener("load", () => window.scrollTo(0, 0));
+
+// 首访微引导：目录逐项点亮一次
+try {
+  if (!sessionStorage.getItem("zs_nudge") && startIdx === 0) {
+    sessionStorage.setItem("zs_nudge", "1");
+    tocItems.forEach((el, i) => {
+      setTimeout(() => {
+        el.classList.add("lit");
+        setTimeout(() => el.classList.remove("lit"), 460);
+      }, 900 + i * 80);
+    });
+  }
+} catch (e) {
+  /* ignore */
+}
 
 window.addEventListener("resize", () => stage.resize());
 
@@ -731,6 +840,10 @@ if (devRaw) {
         const q = QUIZ[Math.min(quizIndex, QUIZ.length - 1)];
         const btn = [...quizOptsEl.querySelectorAll("button")].find((b) => b.textContent === q.ch);
         if (args[0] === "go" && btn) btn.click();
+      }
+      if (target === "drawer") {
+        tocDrawer.style.transition = "none";
+        openDrawer();
       }
     }, 700);
   }, 900);

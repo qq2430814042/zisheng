@@ -22,8 +22,8 @@
 
 ```
 CMIT-zisheng/
-├─ index.html          页面结构（12 个 section + HUD：目录/进度条/翻页/声音）
-├─ css/style.css       全部样式（横向轨道、章节面板、目录、进度条）
+├─ index.html          页面结构（12 个 section + HUD：分级目录/翻页/移动端抽屉/声音）
+├─ css/style.css       全部样式（横向轨道、章节面板、分级目录、抽屉）
 ├─ js/
 │  ├─ main.js          章节配置 sections[]、横向导航 goTo()、五个互动章节、数据动画、dev 测试钩子
 │  ├─ particles.js     粒子引擎（点云采样 makeClusterCloud/makeDiskCloud、morph、setBlend 连续混合）
@@ -41,7 +41,7 @@ CMIT-zisheng/
 
 ## 三、核心实现速览
 
-- **章节导航**：`main.js` 中 `sections[]` 是唯一数据源（id/label/cloud/color/bg/era/opacity）；`goTo(i)` 通过 `translateX(-i*100vw)` 横移轨道，并调用 `applySection()` 切换粒子云与配色。目录（TOC）、进度条、翻页按钮全部由 JS 生成/更新。
+- **章节导航**：`main.js` 中 `sections[]` 是唯一数据源（id/label/cloud/color/bg/era/opacity）；`goTo(i)` 通过 `translateX(-i*100vw)` 横移轨道，并调用 `applySection()` 切换粒子云与配色。分级目录（刻度轴 + 06/12 位置指示）、翻页按钮、移动端抽屉均由 JS 生成/更新；支持深链接 hash（#act-seal）。
 - **左文右效（SIDE）**：桌面端 `SIDE=true`——左侧文字面板、右侧粒子效果区；五幕云经 `shiftCloud(pos, +3.0, 0, 0.8)` 右移缩放，单字/文本云 x 取 `0.72W`，手写云在右半区展开。竖屏 `SIDE=false` 自动回退为上文下效（CSS 媒体查询 `max-width:760px, max-aspect-ratio:20/21` 与 JS 的 `L.portrait` 对应）。**改章节布局时两者要同步改。**
 - **粒子引擎**：字形栅格化 → 像素采样 → 点云（20k 粒子，移动端 9k）；形态过渡 = 逐点线性插值 + 缓动；点云对应关系按"分簇—角度—半径"排序。连续演化用 `setBlend(keyA, keyB, t, animate)`。
 - **字形数据**：`STROKES[字][阶段]` 是 100×100 坐标系的 SVG path 数组；阶段 = oracle/bronze/seal/clerical/regular（regular 用系统楷体渲染）。
@@ -60,7 +60,7 @@ CMIT-zisheng/
 
 1. 全部素材必须程序生成，**禁止引入第三方图片/音频/模型**（版权风险）
 2. 新增古体字：在 `LIB` 加字 → `STROKES` 补齐 4 个古体路径 → 打开 `assets/dev/glyph_test.html` 核对字形 → 需要进五幕时再调 `actCells()`
-3. 新增章节：`sections[]` 加配置 + `index.html` 加 `<section>` + `applySection()` 加分支；目录/进度条自动适配
+3. 新增章节：`sections[]` 加配置 + `index.html` 加 `<section>` + `applySection()` 加分支；目录/位置指示自动适配
 4. 配色沿用每章一套（骨白/铜金/青玉/素墨/月白/暖金），字体用系统楷体+雅黑
 5. 文案风格：文化表述求稳，字量数据引用公开来源，不夸大
 
@@ -87,4 +87,4 @@ $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
 
 ## 八、变更日志
 
-- **2026-10-01**：初版（五幕演变 + 构字 + 字量 + 音效）；扩展（12 字库 + 一字千年时间轴 + 写字 + 认字）；体验升级（横向章节切换 + 命名目录 + 进度条 + 翻页按钮 + 单文件版 + 启动脚本）；**左文右效改版**（桌面端所有章节改为左侧文字面板、右侧粒子效果区，写字/时间轴/构字/认字效果不再被遮挡；五幕字阵右移缩放至右半区；竖屏自动回退为上文下效）
+- **2026-10-01**：初版（五幕演变 + 构字 + 字量 + 音效）；扩展（12 字库 + 一字千年时间轴 + 写字 + 认字）；体验升级（横向章节切换 + 命名目录 + 进度条 + 翻页按钮 + 单文件版 + 启动脚本）；**左文右效改版**（桌面端所有章节改为左侧文字面板、右侧粒子效果区，写字/时间轴/构字/认字效果不再被遮挡；五幕字阵右移缩放至右半区；竖屏自动回退为上文下效）；**目录/导航重构**（五体主线与互动两组分层 + 刻度轴 + 激活长条金色 + 位置指示 06/12；对比度提升；真锚点/ul/li/aria-current/focus-visible；深链接 hash 与刷新恢复；移动端目录抽屉；首访点亮引导；短屏折叠；移除顶部进度条）

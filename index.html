@@ -20,7 +20,12 @@
     <button id="prev-btn" aria-label="上一章">‹</button>
     <button id="next-btn" aria-label="下一章">›</button>
   </div>
-  <div id="progress"><i></i></div>
+  <button id="toc-btn" aria-expanded="false" aria-controls="toc-drawer">目录</button>
+  <div id="toc-backdrop"></div>
+  <aside id="toc-drawer" aria-label="章节目录" aria-hidden="true">
+    <div class="drawer-head"><span>章节目录</span><button id="toc-close" aria-label="关闭目录">×</button></div>
+    <ul id="toc-list-mobile"></ul>
+  </aside>
   <button id="sound-toggle" title="开启/关闭声音">声音：关</button>
 </div>
 
@@ -29,7 +34,7 @@
     <div class="hero-inner">
       <h1>字<span>·</span>生</h1>
       <p class="subtitle">汉字五体演变的粒子交互体验</p>
-      <p class="hint">滚轮 / 方向键 / 左右滑动 切换章节</p>
+      <p class="hint">滚轮 · 方向键 · 左右滑动 切换章节<span class="hint-extra">　|　点右侧目录直达任一章</span></p>
     </div>
   </section>
 
@@ -139,7 +144,7 @@
       <p>《字·生》是一件以汉字五体演变为主题的沉浸式交互网页作品。作品以数万枚实时粒子为笔墨，通过滚动叙事与"构字"互动，呈现"日、月、山、水、人"五个基础象形字从甲骨文到楷书的生长过程。</p>
       <p>古代字形为参照甲骨学通行字形的手绘矢量笔画；楷书与合体字采用系统楷体；全部画面与音效由程序实时生成，未使用第三方图片、模型或音频素材。</p>
       <p class="ai-note">AI 使用说明：本作品的创意构思、视觉设计与交互逻辑由参赛学生主导完成；研发过程使用 AI 编程助手辅助编写代码与文案，使用过程、提示词与人工修改记录均已留档，详见提交的《人工智能工具使用情况说明》。</p>
-      <p class="credit">指导老师：____　作者：____　2026 年第十四届全国大学生数字媒体科技作品及创意竞赛</p>
+      <p class="credit">作者：牛景飞　2026 年第十四届全国大学生数字媒体科技作品及创意竞赛</p>
     </div>
   </section>
 </main>
