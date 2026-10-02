@@ -418,7 +418,7 @@ export const STROKES = {
   },
 };
 
-const FONT_STACK = '"KaiTi","STKaiti","楷体","Microsoft YaHei",serif';
+const FONT_STACK = '"ZiShengKai","KaiTi","STKaiti","楷体","Microsoft YaHei",serif';
 
 // 考据卡：造字法 / 本义 / 字形要点（表述从简从稳）
 export const ETY = {

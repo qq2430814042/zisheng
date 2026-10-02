@@ -17,7 +17,13 @@ const STAGE_NOTE = {
   data: NOTES.zhi,
 };
 
-const FONT_STACK = '"KaiTi","STKaiti","楷体","Microsoft YaHei",serif';
+const FONT_STACK = '"ZiShengKai","KaiTi","STKaiti","楷体","Microsoft YaHei",serif';
+
+// 内嵌楷体就绪后再构建粒子（避免用回退字体采样字形）；最多等待 3 秒
+await Promise.race([
+  document.fonts.load('64px "ZiShengKai"').catch(() => {}),
+  new Promise((r) => setTimeout(r, 3000)),
+]);
 
 const canvas = document.getElementById("scene");
 const isSmall = Math.min(window.innerWidth, window.innerHeight) < 700 || /Mobi/i.test(navigator.userAgent);
@@ -225,6 +231,19 @@ sections.forEach((s, i) => {
 const tocPosEl = document.createElement("div");
 tocPosEl.className = "toc-pos";
 navEl.appendChild(tocPosEl);
+
+// 尾声字墙热区：点任意字 → 看它三千年
+const finaleHotspots = document.getElementById("finale-hotspots");
+LIB.forEach((ch) => {
+  const b = document.createElement("button");
+  b.className = "finale-spot";
+  b.setAttribute("aria-label", "看「" + ch + "」的三千年");
+  b.addEventListener("click", () => showEvolution(ch));
+  finaleHotspots.appendChild(b);
+});
+
+// 一字千年：一键看选中字的全过程
+document.getElementById("btn-timeline-evolve").addEventListener("click", () => showEvolution(libChar));
 
 // 移动端目录抽屉
 const tocBtn = document.getElementById("toc-btn");
@@ -471,8 +490,25 @@ function inkSegment(ctx, p1, p2) {
   ctx.stroke();
 }
 
+function drawInkGrid() {
+  const W = inkCanvas.width;
+  const H = inkCanvas.height;
+  inkCtx.save();
+  inkCtx.strokeStyle = "rgba(233,230,223,.08)";
+  inkCtx.lineWidth = 1;
+  inkCtx.setLineDash([7, 9]);
+  inkCtx.beginPath();
+  inkCtx.moveTo(W / 2, 12);
+  inkCtx.lineTo(W / 2, H - 12);
+  inkCtx.moveTo(12, H / 2);
+  inkCtx.lineTo(W - 12, H / 2);
+  inkCtx.stroke();
+  inkCtx.restore();
+}
+
 function inkRedraw() {
   inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+  drawInkGrid();
   if (writeMode === "guide" && guideTarget) {
     inkCtx.save();
     inkCtx.globalAlpha = 0.13;
@@ -497,13 +533,33 @@ function inkRedraw() {
 }
 
 function inkClear() {
-  inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
   inkStrokes = [];
   inkRedo = [];
   inkCurrent = null;
   inkHasContent = false;
   inkCanvas.classList.remove("dimmed");
   writeHint.textContent = "提示：鼠标或手指按住书写（Ctrl+Z 撤销）";
+  inkRedraw();
+}
+
+function inkBBox() {
+  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+  for (const st of inkStrokes) {
+    for (const p of st) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+  return { minX, minY, bw: Math.max(1, maxX - minX), bh: Math.max(1, maxY - minY) };
+}
+
+// 多字检测：笔迹整体过于扁平，多半写了不止一个字
+function looksMultiChar() {
+  if (!inkHasContent) return false;
+  const { bw, bh } = inkBBox();
+  return bw / bh > 1.6 && bw > inkCanvas.width * 0.5;
 }
 
 function inkUndo() {
@@ -578,17 +634,7 @@ inkCanvas.addEventListener("pointerup", inkEnd);
 inkCanvas.addEventListener("pointercancel", inkEnd);
 
 function buildInkCloud() {
-  let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
-  for (const st of inkStrokes) {
-    for (const p of st) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
-    }
-  }
-  const bw = Math.max(1, maxX - minX);
-  const bh = Math.max(1, maxY - minY);
+  const { minX, minY, bw, bh } = inkBBox();
   const maxW = L.W * (SIDE ? 0.3 : 0.42);
   const maxH = L.H * (SIDE ? 0.62 : 0.4);
   const s = Math.min(maxW / bw, maxH / bh, SIDE ? 5 : 4);
@@ -649,8 +695,16 @@ document.getElementById("btn-particle").addEventListener("click", () => {
   writeFlash.classList.add("on");
   audio.pluck(NOTES.jue);
   if (writeMode === "free") {
-    const ranked = recognizeInk();
-    renderRecogCard(ranked);
+    if (looksMultiChar()) {
+      recogCard.hidden = false;
+      recogCard.innerHTML =
+        "<div>看起来写了不止一个字——一次写一个字，我才能认出它。</div>" +
+        '<div class="recog-actions"><button data-again>再写一次</button></div>';
+      bindRecog();
+      writeHint.textContent = "一次写一个字，识别会准很多";
+    } else {
+      renderRecogCard(recognizeInk());
+    }
   } else {
     writeHint.textContent = "粒子接住了。点“评分”对照描红看看像不像。";
   }
@@ -667,7 +721,6 @@ document.getElementById("btn-clear").addEventListener("click", () => {
   inkClear();
   if (activeId === "write") applyWriteCloud();
 });
-inkClear();
 
 // ---------- 写字：模式 / 识别 / 考据联动 ----------
 let writeMode = "free";
@@ -700,7 +753,7 @@ guideCharSel.value = guideTarget;
 
 function updateGuideInfo() {
   guideTarget = guideCharSel.value;
-  guideInfo.textContent = STROKE_COUNT[guideTarget] + " 画";
+  guideInfo.textContent = STROKE_COUNT[guideTarget] + " 画 · 先横后竖，先撇后捺";
   if (writeMode === "guide") inkRedraw();
 }
 
@@ -759,7 +812,13 @@ nameGenerateBtn.addEventListener("click", () => {
     b.addEventListener("click", () => showEvolution(c, "name:user"));
     nameEvolve.appendChild(b);
   });
-  nameEvolve.hidden = uniq.length === 0;
+  if (uniq.length < name.length) {
+    const note = document.createElement("span");
+    note.className = "name-note";
+    note.textContent = "有些字的三千年我们还没画到——但它们已经在这张星图里了。";
+    nameEvolve.appendChild(note);
+  }
+  nameEvolve.hidden = false;
 });
 
 function saveNameImage() {
@@ -779,7 +838,7 @@ function saveNameImage() {
   const dh = src.height * scale;
   c.drawImage(src, (1920 - dw) / 2, (1080 - dh) / 2, dw, dh);
   c.fillStyle = "rgba(233,230,223,.88)";
-  c.font = '46px "KaiTi","STKaiti","楷体",serif';
+  c.font = '46px "ZiShengKai","KaiTi","STKaiti","楷体",serif';
   c.textAlign = "left";
   c.fillText("名字 · 星图", 84, 138);
   c.fillStyle = "rgba(233,230,223,.5)";
@@ -965,6 +1024,10 @@ btnGrade.addEventListener("click", () => {
     writeHint.textContent = "先在描红底上写一遍";
     return;
   }
+  if (looksMultiChar()) {
+    writeHint.textContent = "看起来写了不止一个字——一次写一个字再评分吧";
+    return;
+  }
   stage.addCloud("write:user", buildInkCloud());
   stage.setCloud("write:user", 1.2);
   stage.setColor("#d9ecff");
@@ -989,7 +1052,7 @@ btnGrade.addEventListener("click", () => {
     sim +
     "%</b>　" +
     scText +
-    "</div><div>" +
+    "</div><div>对照笔画数与字形（不校验笔顺）。" +
     comment +
     "</div>" +
     '<div class="recog-actions"><button data-evolve="' +
@@ -1056,13 +1119,13 @@ etyCard.addEventListener("click", (e) => {
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeEtyCard();
 });
-updateGuideInfo();
+setWriteMode("free");
 
 // ---------- 认字：三关制（认形 / 知义 / 辨体） ----------
 const QUIZ_STAGES = [
-  { key: "shape", name: "认形", count: 10, lead: "这个甲骨文，是今天的哪个字？" },
-  { key: "meaning", name: "知义", count: 6, lead: "它的本义是什么？" },
-  { key: "order", name: "辨体", count: 4, lead: "左右两个字形，哪一个更早？" },
+  { key: "shape", name: "认形", count: 10, lead: "热身关：看字形猜今字——这个甲骨文是今天的哪个字？" },
+  { key: "meaning", name: "知义", count: 6, lead: "理解关：它的本义是什么？" },
+  { key: "order", name: "辨体", count: 4, lead: "时间关：左右两个字形，哪一个更早？" },
 ];
 const quizOptsEl = document.getElementById("quiz-options");
 const quizFeedbackEl = document.getElementById("quiz-feedback");
@@ -1505,9 +1568,9 @@ if (devRaw) {
             for (let i = 1; i < st.length; i++) inkCtx.lineTo(st[i].x, st[i].y);
             inkCtx.stroke();
           };
-          mk([[190, 80], [250, 68], [310, 68], [370, 80], [430, 95]]);
-          mk([[300, 78], [300, 280]]);
-          mk([[210, 170], [390, 170]]);
+          mk([[240, 150], [270, 132], [300, 128], [330, 132], [360, 150]]);
+          mk([[300, 140], [300, 440]]);
+          mk([[230, 270], [370, 270]]);
           inkHasContent = true;
           if (args[0] === "go") document.getElementById("btn-particle").click();
           if (args[0] === "grade") document.getElementById("btn-grade").click();

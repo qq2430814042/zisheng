@@ -22,15 +22,16 @@
 
 ```
 CMIT-zisheng/
-├─ index.html          页面结构（12 个 section + HUD：分级目录/翻页/移动端抽屉/声音）
-├─ css/style.css       全部样式（横向轨道、章节面板、分级目录、抽屉）
+├─ index.html          页面结构（13 个 section + HUD：分级目录/翻页/移动端抽屉/声音）
+├─ css/style.css       全部样式（横向轨道、章节面板、分级目录、抽屉；顶部内嵌 LXGW WenKai 楷体子集 base64）
 ├─ js/
 │  ├─ main.js          章节配置 sections[]、横向导航 goTo()、五个互动章节、数据动画、dev 测试钩子
 │  ├─ particles.js     粒子引擎（点云采样 makeClusterCloud/makeDiskCloud、morph、setBlend 连续混合）
-│  ├─ glyphs.js        12 字 × 4 古体手绘笔画 STROKES、drawGlyph、CHARS/LIB/STAGES
+│  ├─ glyphs.js        30 字 × 4 古体手绘笔画 STROKES、ETY 考据、STROKE_COUNT、drawGlyph、CHARS/LIB/STAGES
 │  └─ audio.js         程序化音景（环境铺底 + 五声音阶拨弦）
 ├─ vendor/three.module.js   Three.js r160（MIT）
-├─ tools/build_single.py    生成单文件版（内联全部 JS）
+├─ tools/build_single.py    生成单文件版（内联全部 JS + CSS，含内嵌字体）
+├─ fonts/                   内嵌字体源文件与 OFL 许可（zisheng-kai.woff2 / OFL-LXGWWenKai.txt）
 ├─ 字生-单文件版.html        构建产物，双击运行
 ├─ 启动预览.bat              启动本地服务器并打开浏览器
 ├─ docs/                    提交材料（md + docx）
@@ -44,10 +45,11 @@ CMIT-zisheng/
 - **章节导航**：`main.js` 中 `sections[]` 是唯一数据源（id/label/cloud/color/bg/era/opacity）；`goTo(i)` 通过 `translateX(-i*100vw)` 横移轨道，并调用 `applySection()` 切换粒子云与配色。分级目录（刻度轴 + 06/12 位置指示）、翻页按钮、移动端抽屉均由 JS 生成/更新；支持深链接 hash（#act-seal）。
 - **左文右效（SIDE）**：桌面端 `SIDE=true`——左侧文字面板、右侧粒子效果区；五幕云经 `shiftCloud(pos, +3.0, 0, 0.8)` 右移缩放，单字/文本云 x 取 `0.72W`，手写云在右半区展开。竖屏 `SIDE=false` 自动回退为上文下效（CSS 媒体查询 `max-width:760px, max-aspect-ratio:20/21` 与 JS 的 `L.portrait` 对应）。**改章节布局时两者要同步改。**
 - **粒子引擎**：字形栅格化 → 像素采样 → 点云（20k 粒子，移动端 9k）；形态过渡 = 逐点线性插值 + 缓动；点云对应关系按"分簇—角度—半径"排序。连续演化用 `setBlend(keyA, keyB, t, animate)`。
-- **字形数据**：`STROKES[字][阶段]` 是 100×100 坐标系的 SVG path 数组；阶段 = oracle/bronze/seal/clerical/regular（regular 用系统楷体渲染）。
+- **字形数据**：`STROKES[字][阶段]` 是 100×100 坐标系的 SVG path 数组；阶段 = oracle/bronze/seal/clerical/regular（regular 用内嵌楷体 ZilshengKai/LXGW WenKai 渲染）。
 - **写字**：pointer 事件采集笔迹 → 包围盒归一化 → 画到 1600×900 离屏画布 → 采样成粒子云。
-- **认字**：`QUIZ[]` 题目数据；答对后 `setCloud(quiz:<字>:regular)` 演变为楷书。
-- **音效**：Web Audio 实时合成，无音频文件；`STAGE_NOTE` 决定每章拨弦音高。
+- **认字**：三关制 `QUIZ_STAGES`（认形 10 / 知义 6 / 辨体 4）；认形干扰项按模板相似度自动选形近字；知义答对弹考据卡；辨体用 `buildPairCloud` 并排两个字阶。
+- **音效**：Web Audio 实时合成，无音频文件；`STAGE_NOTE` 决定每章拨弦音高；`pluckForChar` 按笔画数分配音高。
+- **字体内嵌**：LXGW WenKai（SIL OFL 1.1）子集（780 字 → 165KB woff2）base64 内嵌在 style.css 顶部；主程序在构建粒子前 `await document.fonts.load('64px "ZiShengKai"')`，避免用回退字体采样字形。
 
 ## 四、运行 / 构建 / 部署
 
@@ -61,7 +63,7 @@ CMIT-zisheng/
 1. 全部素材必须程序生成，**禁止引入第三方图片/音频/模型**（版权风险）
 2. 新增古体字：在 `LIB` 加字 → `STROKES` 补齐 4 个古体路径 → 打开 `assets/dev/glyph_test.html` 核对字形 → 需要进五幕时再调 `actCells()`
 3. 新增章节：`sections[]` 加配置 + `index.html` 加 `<section>` + `applySection()` 加分支；目录/位置指示自动适配
-4. 配色沿用每章一套（骨白/铜金/青玉/素墨/月白/暖金），字体用系统楷体+雅黑
+4. 配色沿用每章一套（骨白/铜金/青玉/素墨/月白/暖金）；字体：楷体语境用内嵌 ZiShengKai，界面正文用系统雅黑；**新增作品用字后需重新子集化字体**（见 第八节）
 5. 文案风格：文化表述求稳，字量数据引用公开来源，不夸大
 
 ## 六、自测方法（无头截图，不影响用户浏览器）
@@ -74,14 +76,14 @@ $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
   "http://127.0.0.1:8017/index.html?v=99&dev=go:5"
 ```
 
-- `?dev=go:<索引>`：直接跳章节（0=开篇 … 11=关于）
+- `?dev=go:<索引>`：直接跳章节（0=开篇 … 12=关于）
 - `?dev=solo:<章节>:<参数>`：隐藏其他章节测试单个互动（timeline:木:250 / combine:日月:go / write:go / quiz:go）
 - 注意：无头模式虚拟时间不推进 morph，截图显示的是过渡起点状态，属测试环境限制
 
 ## 七、已知问题与注意事项
 
 - dev 测试钩子（`?dev=`/`#dev=`）**交付前必须移除**，之后重建单文件版
-- 楷体依赖系统字体：Windows/macOS 正常显示，Linux 可能回退
+- 楷体已内嵌（LXGW WenKai OFL 子集），全平台一致；修改作品用字后需重新子集化（fonts/ 与 style.css 顶部 @font-face）
 - 竖屏小屏下各面板高度较紧张，已做媒体查询压缩；如遇遮挡优先调 `@media (max-height: 720px)` 段
 - 音频默认关闭，需用户点击开启（浏览器自动播放策略）
 

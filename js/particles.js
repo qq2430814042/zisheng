@@ -1,7 +1,7 @@
 // particles.js — 粒子引擎：点云采样、形态过渡、渲染
 import * as THREE from "../vendor/three.module.js";
 
-const FONT_STACK = '"KaiTi","STKaiti","楷体","Microsoft YaHei",serif';
+const FONT_STACK = '"ZiShengKai","KaiTi","STKaiti","楷体","Microsoft YaHei",serif';
 
 function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
