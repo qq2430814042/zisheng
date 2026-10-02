@@ -44,13 +44,14 @@ def strip_module(src):
     src = re.sub(r"^export ", "", src, flags=re.M)
     return src
 
+evo_data = strip_module(read(r"js\evo-data.js"))
 glyphs = strip_module(read(r"js\glyphs.js"))
 stroke_counts = strip_module(read(r"js\stroke-counts.js"))
 audio = strip_module(read(r"js\audio.js"))
 particles = strip_module(read(r"js\particles.js"))
 main = strip_module(read(r"js\main.js"))
 
-parts = [three, glyphs, stroke_counts, hs_wrapped, audio, particles, main]
+parts = [three, evo_data, glyphs, stroke_counts, hs_wrapped, audio, particles, main]
 full = "\n\n".join(parts)
 
 # 去掉重复的 FONT_STACK 定义（保留第一个）

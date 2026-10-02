@@ -1,6 +1,6 @@
 // main.js — 叙事控制、构字互动与数据动画
 import { ParticleStage, makeClusterCloud, makeDiskCloud } from "./particles.js";
-import { CHARS, LIB, RECOG, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT } from "./glyphs.js";
+import { CHARS, LIB, RECOG, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT, EVO_CHARS, evoAvailable, STROKES } from "./glyphs.js";
 import { RECOG_STROKES } from "./stroke-counts.js";
 import { AmbientAudio, NOTES } from "./audio.js";
 
@@ -17,6 +17,28 @@ const STAGE_NOTE = {
   finale: NOTES.gongHigh,
   data: NOTES.zhi,
 };
+
+// 各阶段大致年代（扩展字库的"字形档案"用）
+const STAGE_ERA = {
+  oracle: "商",
+  bronze: "商周",
+  "bamboo-silk": "战国—汉",
+  seal: "秦",
+  clerical: "汉",
+  regular: "今",
+};
+const EVO_ANCIENT = ["oracle", "bronze", "bamboo-silk", "seal", "clerical"];
+
+// 某字的阶段序列：精选 30 字固定五体；扩展字按实际收录的阶段（可缺早期阶段）
+function seqOf(ch) {
+  if (LIB.includes(ch)) return STROKES[ch] ? STAGES : null;
+  const av = evoAvailable(ch);
+  if (!av) return null;
+  const seq = EVO_ANCIENT.filter((s) => av.includes(s));
+  if (!seq.length) return null;
+  seq.push("regular");
+  return seq;
+}
 
 const FONT_STACK = '"ZiShengKai","KaiTi","STKaiti","楷体","Microsoft YaHei",serif';
 
@@ -421,35 +443,118 @@ let libProgress = 0;
 const libChipsEl = document.getElementById("lib-chips");
 const rangeEl = document.getElementById("time-range");
 const timeLabelsEl = document.getElementById("time-labels");
+const timeNoteEl = document.getElementById("time-note");
 
 LIB.forEach((ch) => {
   const b = document.createElement("button");
   b.className = "lib-chip";
   b.dataset.ch = ch;
   b.textContent = ch;
-  b.addEventListener("click", () => {
-    libChar = ch;
-    syncLibChips();
-    if (activeId === "timeline") showTimeline(true);
-  });
+  b.addEventListener("click", () => loadLibChar(ch, true));
   libChipsEl.appendChild(b);
 });
 
+// 扩展字库选择器（708 字）
+const libMoreBtn = document.createElement("button");
+libMoreBtn.className = "lib-chip lib-more";
+libMoreBtn.textContent = "更多字 " + EVO_CHARS.length + " ›";
+libChipsEl.appendChild(libMoreBtn);
+
+const libOverlay = document.getElementById("lib-overlay");
+const libGridEl = document.getElementById("lib-grid");
+const libSearchEl = document.getElementById("lib-search");
+document.getElementById("lib-count").textContent = EVO_CHARS.length + " 字";
+libMoreBtn.addEventListener("click", () => {
+  libOverlay.classList.add("open");
+  libOverlay.setAttribute("aria-hidden", "false");
+  libSearchEl.value = "";
+  renderLibGrid("");
+  libSearchEl.focus();
+});
+function closeLibOverlay() {
+  libOverlay.classList.remove("open");
+  libOverlay.setAttribute("aria-hidden", "true");
+}
+document.getElementById("lib-close").addEventListener("click", closeLibOverlay);
+libOverlay.addEventListener("click", (e) => {
+  if (e.target === libOverlay) closeLibOverlay();
+});
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && libOverlay.classList.contains("open")) closeLibOverlay();
+});
+libSearchEl.addEventListener("input", () => renderLibGrid(libSearchEl.value.trim()));
+
+function renderLibGrid(q) {
+  let html = "";
+  let n = 0;
+  for (const ch of EVO_CHARS) {
+    if (q && ch !== q && !ch.includes(q)) continue;
+    const seq = seqOf(ch) || [];
+    const ancient = seq.filter((s) => s !== "regular");
+    const title = ancient.map((s) => STAGE_NAMES[s]).join(" · ");
+    const early = ancient[0] === "oracle" ? "" : " no-oracle";
+    html += '<button class="lib-cell' + early + '" data-ch="' + ch + '" title="' + title + '">' + ch + "</button>";
+    if (++n >= 760) break;
+  }
+  libGridEl.innerHTML = html || '<p class="lib-empty">没有找到这个字</p>';
+}
+libGridEl.addEventListener("click", (e) => {
+  const b = e.target.closest(".lib-cell");
+  if (!b) return;
+  closeLibOverlay();
+  loadLibChar(b.dataset.ch, true);
+});
+
 function syncLibChips() {
-  libChipsEl.querySelectorAll(".lib-chip").forEach((el) => {
+  libChipsEl.querySelectorAll(".lib-chip[data-ch]").forEach((el) => {
     el.classList.toggle("active", el.dataset.ch === libChar);
   });
 }
 
+function renderTimeLabels(seq) {
+  timeLabelsEl.innerHTML = seq.map((s) => "<span>" + STAGE_NAMES[s] + "</span>").join("");
+}
+
+function updateTimeNote(seq) {
+  const ancient = seq.filter((s) => s !== "regular");
+  if (LIB.includes(libChar)) {
+    timeNoteEl.classList.remove("show");
+    return;
+  }
+  let note = "收录 " + ancient.length + " 个历史阶段：" + ancient.map((s) => STAGE_NAMES[s]).join(" → ");
+  if (!ancient.includes("oracle")) note += "。甲骨文暂未见此字——有的字出生得晚，这也是汉字的故事。";
+  timeNoteEl.textContent = note;
+  timeNoteEl.classList.add("show");
+}
+
+function loadLibChar(ch, animate) {
+  libChar = ch;
+  syncLibChips();
+  const seq = seqOf(ch) || STAGES;
+  rangeEl.max = String((seq.length - 1) * 100);
+  rangeEl.value = "0";
+  libProgress = 0;
+  renderTimeLabels(seq);
+  updateTimeNote(seq);
+  if (activeId === "timeline") showTimeline(animate);
+}
+
+const timelineLRU = [];
 function timelineCloudKey(ch, stageName) {
-  return ensureCloud("s:" + ch + ":" + stageName, () => buildSingleCloud(ch, stageName));
+  const key = ensureCloud("s:" + ch + ":" + stageName, () => buildSingleCloud(ch, stageName));
+  if (!timelineLRU.includes(key)) {
+    timelineLRU.push(key);
+    while (timelineLRU.length > 30) stage.removeCloud(timelineLRU.shift());
+  }
+  return key;
 }
 
 function showTimeline(animate) {
-  const i = Math.min(STAGES.length - 2, Math.floor(libProgress));
+  const seq = seqOf(libChar) || STAGES;
+  const i = Math.min(seq.length - 2, Math.floor(libProgress));
   const t = Math.min(1, libProgress - i);
-  const keyA = timelineCloudKey(libChar, STAGES[i]);
-  const keyB = timelineCloudKey(libChar, STAGES[i + 1]);
+  const keyA = timelineCloudKey(libChar, seq[i]);
+  const keyB = timelineCloudKey(libChar, seq[i + 1]);
   stage.setBlend(keyA, keyB, t, animate);
   const idx = Math.round(libProgress);
   [...timeLabelsEl.children].forEach((el, k) => el.classList.toggle("on", k === idx));
@@ -1249,31 +1354,41 @@ btnGrade.addEventListener("click", () => {
 // ---- 联动：跳一字千年并自动推演 + 考据卡 ----
 // fromKey 可选："write:user"（手写笔迹）或 "name:user"（名字图）——先原地长成甲骨文，再走完五体
 function showEvolution(ch, fromKey) {
+  const seq = seqOf(ch);
+  if (!seq) {
+    const hint = document.getElementById("write-hint");
+    if (hint) hint.textContent = "「" + ch + "」的字形演变暂未收录——有的字出生得晚。试试：我、爱、好、明、学、山、水、人…";
+    return;
+  }
   libChar = ch;
   syncLibChips();
   libProgress = 0;
+  rangeEl.max = String((seq.length - 1) * 100);
   rangeEl.value = 0;
+  renderTimeLabels(seq);
+  updateTimeNote(seq);
   const idx = sections.findIndex((s) => s.id === "timeline");
   if (idx >= 0) goTo(idx);
   clearInterval(evolveTimer);
-  const oracleKey = timelineCloudKey(ch, STAGES[0]);
+  const firstKey = timelineCloudKey(ch, seq[0]);
+  const maxV = (seq.length - 1) * 100;
   const startPlay = () => {
     let v = 0;
     evolveTimer = setInterval(() => {
       v += 4;
-      if (v >= 400) {
-        v = 400;
+      if (v >= maxV) {
+        v = maxV;
         clearInterval(evolveTimer);
       }
       rangeEl.value = v;
       libProgress = v / 100;
       showTimeline(false);
-      if (v >= 400) setTimeout(() => showEtyCard(ch), 700);
+      if (v >= maxV) setTimeout(() => showEtyCard(ch), 700);
     }, 55);
   };
   if (fromKey && stage.clouds[fromKey]) {
     stage.setBlend(fromKey, fromKey, 0, false);
-    stage.setBlend(fromKey, oracleKey, 1, true);
+    stage.setBlend(fromKey, firstKey, 1, true);
     setTimeout(startPlay, 1550);
   } else {
     showTimeline(true);
@@ -1283,11 +1398,23 @@ function showEvolution(ch, fromKey) {
 }
 
 function showEtyCard(ch) {
-  const e = ETY[ch] || { method: "象形", meaning: ch, note: "" };
+  const e = ETY[ch];
   document.getElementById("ety-char").textContent = ch;
-  document.getElementById("ety-method").textContent = e.method;
-  document.getElementById("ety-meaning").textContent = "本义：" + e.meaning;
-  document.getElementById("ety-note").textContent = e.note;
+  if (e) {
+    document.getElementById("ety-method").textContent = e.method;
+    document.getElementById("ety-meaning").textContent = "本义：" + e.meaning;
+    document.getElementById("ety-note").textContent = e.note;
+  } else {
+    const seq = seqOf(ch) || [];
+    const ancient = seq.filter((s) => s !== "regular");
+    document.getElementById("ety-method").textContent = "字形流变";
+    document.getElementById("ety-meaning").textContent =
+      ancient.length && STAGE_ERA[ancient[0]] ? "可见最早形态：" + STAGE_NAMES[ancient[0]] + " · " + STAGE_ERA[ancient[0]] : "";
+    let note = "该字共收录 " + ancient.length + " 个历史字形（甲骨—楷书）。";
+    if (!ancient.includes("oracle")) note += "甲骨文暂未见此字——它出现得比较晚。";
+    note += "精选 30 字附完整释读考据；扩展字形来自开源古文字数据集。";
+    document.getElementById("ety-note").textContent = note;
+  }
   etyCard.classList.add("show");
   etyCard.setAttribute("aria-hidden", "false");
 }
@@ -1716,8 +1843,15 @@ if (devRaw) {
     }
     setTimeout(() => {
       if (target === "timeline") {
-        if (args[0]) libChar = args[0];
-        syncLibChips();
+        if (args[0] === "grid") {
+          renderLibGrid("");
+          libOverlay.classList.add("open");
+          libOverlay.setAttribute("aria-hidden", "false");
+        } else if (args[0]) {
+          loadLibChar(args[0], false);
+        } else {
+          syncLibChips();
+        }
         if (args[1] !== undefined) {
           libProgress = Number(args[1]) / 100;
           rangeEl.value = args[1];

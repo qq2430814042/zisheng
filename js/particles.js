@@ -175,6 +175,11 @@ export class ParticleStage {
 
   hasCloud(key) { return !!this.clouds[key]; }
 
+  removeCloud(key) {
+    if (this.target === this.clouds[key]) return;
+    delete this.clouds[key];
+  }
+
   setCloud(key, duration = 1.3) {
     const target = this.clouds[key];
     if (!target || target === this.target) return;

@@ -15,9 +15,11 @@ CMIT-zisheng/
 ├─ js/
 │  ├─ main.js            叙事控制、构字互动、数据动画
 │  ├─ particles.js       粒子引擎（点云采样 / 形态过渡 / 渲染）
-│  ├─ glyphs.js          五种字形数据（手绘矢量笔画）
+│  ├─ glyphs.js          精选 30 字手绘字形 + 扩展字库懒解码
+│  ├─ evo-data.js        扩展演变字库数据（708 字，由 tools/build_evo.py 生成）
 │  └─ audio.js           程序化音景（Web Audio）
-├─ vendor/three.module.js  Three.js r160（MIT）
+├─ vendor/                 Three.js r160（MIT）、HanScribe 手写识别（MIT）
+├─ tools/                 构建脚本（单文件 / 字体子集 / 扩展字库生成）
 ├─ docs/                 提交材料（说明文档 / AI使用说明 / 视频脚本 / 答辩提纲，含 Word 版）
 └─ assets/
    ├─ dev/               开发自检页（glyph_test / test_mobile，不参与提交）

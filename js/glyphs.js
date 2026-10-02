@@ -1,5 +1,6 @@
 // glyphs.js — 字形数据与栅格化工具
-// 古代字形为手绘矢量笔画（100x100 坐标系），楷书使用系统楷体渲染
+// 精选 30 字为手绘矢量笔画（100x100 坐标系）；扩展字库由开源古文字数据集骨架化生成
+import { EVO_EXTRA, EVO_CHARS } from "./evo-data.js";
 
 export const CHARS = ["日", "月", "山", "水", "人"];
 export const LIB = [
@@ -15,6 +16,7 @@ export const STAGES = ["oracle", "bronze", "seal", "clerical", "regular"];
 export const STAGE_NAMES = {
   oracle: "甲骨文",
   bronze: "金文",
+  "bamboo-silk": "简帛",
   seal: "小篆",
   clerical: "隶书",
   regular: "楷书",
@@ -22,6 +24,7 @@ export const STAGE_NAMES = {
 export const STAGE_LINE_WIDTH = {
   oracle: 4.2,
   bronze: 5.6,
+  "bamboo-silk": 4.6,
   seal: 4.6,
   clerical: 5.4,
   regular: 0,
@@ -474,7 +477,11 @@ export function drawGlyph(ctx, ch, stage, cx, cy, size) {
     ctx.fillText(ch, cx, cy + size * 0.02);
     return;
   }
-  const data = STROKES[ch] && STROKES[ch][stage];
+  let data = STROKES[ch] && STROKES[ch][stage];
+  if (!data && EVO_EXTRA[ch]) {
+    ensureEvo(ch);
+    data = STROKES[ch] && STROKES[ch][stage];
+  }
   if (!data) return;
   ctx.save();
   ctx.translate(cx - size / 2, cy - size / 2);
@@ -487,3 +494,37 @@ export function drawGlyph(ctx, ch, stage, cx, cy, size) {
   }
   ctx.restore();
 }
+
+// ---------- 扩展字库：方向数字编码按需解码并并入 STROKES ----------
+// 精选 30 字的手绘数据优先，缺的阶段才用开源数据集骨架补齐
+const EVO_DIRS = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
+const EVO_DECODED = new Set();
+function decodeEvoStage(enc) {
+  return enc.split("|").map((p) => {
+    const i = p.indexOf(":");
+    const head = p.slice(0, i).split(",");
+    let x = +head[0], y = +head[1];
+    let d = "M" + Math.round((x * 100) / 192) + " " + Math.round((y * 100) / 192);
+    for (const c of p.slice(i + 1)) {
+      const v = EVO_DIRS[+c];
+      x += v[0]; y += v[1];
+      d += " L" + Math.round((x * 100) / 192) + " " + Math.round((y * 100) / 192);
+    }
+    return d;
+  });
+}
+function ensureEvo(ch) {
+  const stages = EVO_EXTRA[ch];
+  if (!stages || EVO_DECODED.has(ch)) return;
+  EVO_DECODED.add(ch);
+  const slot = STROKES[ch] || (STROKES[ch] = {});
+  for (const st in stages) {
+    if (!slot[st]) slot[st] = decodeEvoStage(stages[st]);
+  }
+}
+// 该字在数据集中收录了哪些古代阶段（不触发解码）
+export function evoAvailable(ch) {
+  const e = EVO_EXTRA[ch];
+  return e ? Object.keys(e) : null;
+}
+export { EVO_CHARS };
