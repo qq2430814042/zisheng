@@ -855,9 +855,9 @@ function saveNameImage() {
 }
 nameSaveBtn.addEventListener("click", saveNameImage);
 
-// ---- 识别引擎：包围盒归一化 → 14×14 覆盖网格 → 余弦相似度 ----
+// ---- 识别引擎：覆盖网格 + 笔画方向直方图 双特征，余弦相似度 ----
 const FEAT_N = 14;
-function maskFeature(drawFn, W, H) {
+function computeFeatures(drawFn, W, H) {
   const cv = document.createElement("canvas");
   cv.width = W;
   cv.height = H;
@@ -867,10 +867,12 @@ function maskFeature(drawFn, W, H) {
   ctx.strokeStyle = "#fff";
   drawFn(ctx, W, H);
   const img = ctx.getImageData(0, 0, W, H).data;
+  const mask = new Uint8Array(W * H);
   let minX = W, minY = H, maxX = -1, maxY = -1;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       if (img[(y * W + x) * 4 + 3] > 80) {
+        mask[y * W + x] = 1;
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -878,31 +880,46 @@ function maskFeature(drawFn, W, H) {
       }
     }
   }
-  const f = new Float32Array(FEAT_N * FEAT_N);
-  if (maxX < 0) return f;
-  const bw = maxX - minX + 1;
-  const bh = maxY - minY + 1;
-  const side = Math.max(bw, bh);
-  const ox = minX - (side - bw) / 2;
-  const oy = minY - (side - bh) / 2;
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      if (img[(y * W + x) * 4 + 3] <= 80) continue;
-      const gx = Math.min(FEAT_N - 1, Math.max(0, Math.floor(((x - ox) / side) * FEAT_N)));
-      const gy = Math.min(FEAT_N - 1, Math.max(0, Math.floor(((y - oy) / side) * FEAT_N)));
-      f[gy * FEAT_N + gx] += 1;
+  const cov = new Float32Array(FEAT_N * FEAT_N);
+  const grad = new Float32Array(FEAT_N * FEAT_N * 8);
+  if (maxX >= 0) {
+    const bw = maxX - minX + 1;
+    const bh = maxY - minY + 1;
+    const side = Math.max(bw, bh);
+    const ox = minX - (side - bw) / 2;
+    const oy = minY - (side - bh) / 2;
+    for (let y = 1; y < H - 1; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        if (!mask[y * W + x]) continue;
+        const gx = mask[y * W + x + 1] - mask[y * W + x - 1];
+        const gy = mask[(y + 1) * W + x] - mask[(y - 1) * W + x];
+        const mag = Math.hypot(gx, gy);
+        const cx = Math.min(FEAT_N - 1, Math.max(0, Math.floor(((x - ox) / side) * FEAT_N)));
+        const cy = Math.min(FEAT_N - 1, Math.max(0, Math.floor(((y - oy) / side) * FEAT_N)));
+        cov[cy * FEAT_N + cx] += 1;
+        if (mag > 0.01) {
+          let ang = Math.atan2(gy, gx);
+          if (ang < 0) ang += Math.PI;
+          const bin = Math.min(7, Math.floor(ang / (Math.PI / 8)));
+          grad[(cy * FEAT_N + cx) * 8 + bin] += mag;
+        }
+      }
     }
   }
   let n = 0;
-  for (let i = 0; i < f.length; i++) n += f[i] * f[i];
+  for (let i = 0; i < cov.length; i++) n += cov[i] * cov[i];
   n = Math.sqrt(n) || 1;
-  for (let i = 0; i < f.length; i++) f[i] /= n;
-  return f;
+  for (let i = 0; i < cov.length; i++) cov[i] /= n;
+  n = 0;
+  for (let i = 0; i < grad.length; i++) n += grad[i] * grad[i];
+  n = Math.sqrt(n) || 1;
+  for (let i = 0; i < grad.length; i++) grad[i] /= n;
+  return { cov, grad };
 }
 
 const TEMPLATES = {};
 LIB.forEach((ch) => {
-  TEMPLATES[ch] = maskFeature((ctx, W, H) => {
+  TEMPLATES[ch] = computeFeatures((ctx, W, H) => {
     ctx.font = Math.round(H * 0.82) + "px " + FONT_STACK;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -910,8 +927,8 @@ LIB.forEach((ch) => {
   }, 72, 72);
 });
 
-function inkFeature() {
-  return maskFeature((ctx, W, H) => {
+function inkFeatures() {
+  return computeFeatures((ctx, W, H) => {
     const pad = 10;
     const s = (W - pad * 2) / inkCanvas.width;
     ctx.save();
@@ -941,13 +958,15 @@ function inkFeature() {
 }
 
 function similarity(f, t) {
-  let dot = 0;
-  for (let i = 0; i < f.length; i++) dot += f[i] * t[i];
-  return dot;
+  let c = 0;
+  let g = 0;
+  for (let i = 0; i < f.cov.length; i++) c += f.cov[i] * t.cov[i];
+  for (let i = 0; i < f.grad.length; i++) g += f.grad[i] * t.grad[i];
+  return 0.55 * c + 0.45 * g;
 }
 
 function recognizeInk() {
-  const f = inkFeature();
+  const f = inkFeatures();
   const ranked = LIB.map((ch) => ({ ch, score: similarity(f, TEMPLATES[ch]) }));
   ranked.sort((a, b) => b.score - a.score);
   return ranked;
@@ -972,9 +991,10 @@ function bindRecog() {
 function renderRecogCard(ranked) {
   const top = ranked[0];
   const second = ranked[1];
+  const margin = top.score - second.score;
   recogCard.hidden = false;
   const pct = (s) => Math.min(95, Math.round(s * 100));
-  if (top.score >= 0.55) {
+  if (top.score >= 0.65 && margin >= 0.05) {
     recogCard.innerHTML =
       "<div>粒子接住了你的字，它很像 <b>" +
       top.ch +
@@ -986,7 +1006,7 @@ function renderRecogCard(ranked) {
       '">看它三千年</button><button data-again>再写一次</button></div>';
     writeHint.textContent = "认出来了——看看它的三千年吧";
     pluckForChar(top.ch);
-  } else if (top.score >= 0.42) {
+  } else if (top.score >= 0.5) {
     recogCard.innerHTML =
       "<div>有点像 <b>" +
       top.ch +
@@ -1010,7 +1030,7 @@ function renderRecogCard(ranked) {
     audio.pluck(NOTES.yu);
   } else {
     recogCard.innerHTML =
-      "<div>这次没有认出来——它已经属于星河了。试试笔画少的字，或切到「跟着写」模式。</div>" +
+      "<div>没能认出这个字——它可能不在我们的 30 字库里（目前收录：日月山水人木火雨目口田大牛羊女子刀弓门舟云天心手耳鸟土石竹犬）。也可以切到「跟着写」临摹一个字。</div>" +
       '<div class="recog-actions"><button data-again>再写一次</button></div>';
     writeHint.textContent = "没关系，再写一个";
     audio.pluck(NOTES.yu);
@@ -1035,7 +1055,7 @@ btnGrade.addEventListener("click", () => {
   writeFlash.classList.remove("on");
   void writeFlash.offsetWidth;
   writeFlash.classList.add("on");
-  const f = inkFeature();
+  const f = inkFeatures();
   const sim = Math.min(95, Math.round(similarity(f, TEMPLATES[guideTarget]) * 100));
   const sc = STROKE_COUNT[guideTarget];
   const mine = inkStrokes.length;
