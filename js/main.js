@@ -13,6 +13,7 @@ const STAGE_NOTE = {
   combine: NOTES.gongHigh,
   write: NOTES.yu,
   quiz: NOTES.shang,
+  finale: NOTES.gongHigh,
   data: NOTES.zhi,
 };
 
@@ -102,6 +103,7 @@ function buildTextCloud(text, size, yRatio = 0.5) {
 stage.addCloud("idle", makeDiskCloud(COUNT, 3.4));
 stage.addCloud("idle2", makeDiskCloud(COUNT, 4.2));
 for (const s of STAGES) stage.addCloud(s, buildActCloud(s));
+stage.addCloud("finale", buildFinaleCloud());
 
 // 单字点云（一字千年章节 / 认字章节用，按需构建）
 function buildSingleCloud(ch, stageName, yRatio = 0.3) {
@@ -110,6 +112,49 @@ function buildSingleCloud(ch, stageName, yRatio = 0.3) {
   const cy = L.H * (SIDE ? 0.5 : yRatio);
   const clusters = [{ x: cx - size / 2 - 20, y: cy - size / 2 - 20, w: size + 40, h: size + 40 }];
   const drawAll = (ctx) => drawGlyph(ctx, ch, stageName, cx, cy, size);
+  return makeClusterCloud(L.W, L.H, clusters, COUNT, drawAll, worldW, worldH);
+}
+
+// 双字形对（认字·辨体）：同一字的两个阶段左右并排
+function buildPairCloud(ch, stageA, stageB) {
+  const size = L.portrait ? 190 : 230;
+  const cy = L.H * (SIDE ? 0.5 : 0.3);
+  const cx = L.W * (SIDE ? 0.72 : 0.5);
+  const dx = size * 1.25;
+  const clusters = [
+    { x: cx - dx - size / 2 - 16, y: cy - size / 2 - 16, w: size + 32, h: size + 32 },
+    { x: cx + dx - size / 2 - 16, y: cy - size / 2 - 16, w: size + 32, h: size + 32 },
+  ];
+  const drawAll = (ctx) => {
+    drawGlyph(ctx, ch, stageA, cx - dx, cy, size);
+    drawGlyph(ctx, ch, stageB, cx + dx, cy, size);
+  };
+  return makeClusterCloud(L.W, L.H, clusters, COUNT, drawAll, worldW, worldH);
+}
+
+// 尾声：30 字字墙（10×3 或 6×5 网格）
+function buildFinaleCloud() {
+  const cols = L.portrait ? 6 : 10;
+  const rows = L.portrait ? 5 : 3;
+  const cellW = L.W / cols;
+  const cellH = (L.H * 0.6) / rows;
+  const size = Math.min(cellW, cellH) * 0.62;
+  const y0 = L.H * 0.12 + cellH / 2;
+  const cells = [];
+  LIB.forEach((ch, i) => {
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    cells.push({ ch, cx: cellW * (c + 0.5), cy: y0 + r * cellH });
+  });
+  const clusters = cells.map((c) => ({
+    x: c.cx - size / 2 - 12,
+    y: c.cy - size / 2 - 12,
+    w: size + 24,
+    h: size + 24,
+  }));
+  const drawAll = (ctx) => {
+    cells.forEach((c) => drawGlyph(ctx, c.ch, "regular", c.cx, c.cy, size));
+  };
   return makeClusterCloud(L.W, L.H, clusters, COUNT, drawAll, worldW, worldH);
 }
 
@@ -126,6 +171,7 @@ const sections = [
   { id: "write", label: "写字", cloud: null, color: "#bfe3ff", bg: "#0a0b0e", era: "写字", opacity: 1 },
   { id: "quiz", label: "认字", cloud: null, color: "#ffd9a0", bg: "#0c0b0a", era: "认字", opacity: 1 },
   { id: "data", label: "字量", cloud: "idle2", color: "#9ab8d8", bg: "#0a0b0f", era: "字量", opacity: 0.3 },
+  { id: "finale", label: "尾声", cloud: "finale", color: "#e8d8b0", bg: "#0c0b0a", era: "尾声", opacity: 1 },
   { id: "about", label: "关于", cloud: "idle2", color: "#9ab8d8", bg: "#0a0b0f", era: "关于", opacity: 0.22 },
 ];
 
@@ -710,7 +756,7 @@ nameGenerateBtn.addEventListener("click", () => {
   uniq.forEach((c) => {
     const b = document.createElement("button");
     b.textContent = "看「" + c + "」的三千年";
-    b.addEventListener("click", () => showEvolution(c));
+    b.addEventListener("click", () => showEvolution(c, "name:user"));
     nameEvolve.appendChild(b);
   });
   nameEvolve.hidden = uniq.length === 0;
@@ -852,7 +898,10 @@ function recognizeInk() {
 function bindRecog() {
   const evolveBtn = recogCard.querySelector("[data-evolve]");
   const againBtn = recogCard.querySelector("[data-again]");
-  if (evolveBtn) evolveBtn.addEventListener("click", () => showEvolution(evolveBtn.dataset.evolve));
+  if (evolveBtn)
+    evolveBtn.addEventListener("click", () =>
+      showEvolution(evolveBtn.dataset.evolve, writeMode === "name" ? "name:user" : "write:user")
+    );
   if (againBtn)
     againBtn.addEventListener("click", () => {
       inkClear();
@@ -952,27 +1001,38 @@ btnGrade.addEventListener("click", () => {
 });
 
 // ---- 联动：跳一字千年并自动推演 + 考据卡 ----
-function showEvolution(ch) {
+// fromKey 可选："write:user"（手写笔迹）或 "name:user"（名字图）——先原地长成甲骨文，再走完五体
+function showEvolution(ch, fromKey) {
   libChar = ch;
   syncLibChips();
   libProgress = 0;
   rangeEl.value = 0;
   const idx = sections.findIndex((s) => s.id === "timeline");
   if (idx >= 0) goTo(idx);
-  showTimeline(true);
   clearInterval(evolveTimer);
-  let v = 0;
-  evolveTimer = setInterval(() => {
-    v += 4;
-    if (v >= 400) {
-      v = 400;
-      clearInterval(evolveTimer);
-    }
-    rangeEl.value = v;
-    libProgress = v / 100;
-    showTimeline(false);
-    if (v >= 400) setTimeout(() => showEtyCard(ch), 700);
-  }, 55);
+  const oracleKey = timelineCloudKey(ch, STAGES[0]);
+  const startPlay = () => {
+    let v = 0;
+    evolveTimer = setInterval(() => {
+      v += 4;
+      if (v >= 400) {
+        v = 400;
+        clearInterval(evolveTimer);
+      }
+      rangeEl.value = v;
+      libProgress = v / 100;
+      showTimeline(false);
+      if (v >= 400) setTimeout(() => showEtyCard(ch), 700);
+    }, 55);
+  };
+  if (fromKey && stage.clouds[fromKey]) {
+    stage.setBlend(fromKey, fromKey, 0, false);
+    stage.setBlend(fromKey, oracleKey, 1, true);
+    setTimeout(startPlay, 1550);
+  } else {
+    showTimeline(true);
+    startPlay();
+  }
   pluckForChar(ch);
 }
 
@@ -998,68 +1058,142 @@ window.addEventListener("keydown", (e) => {
 });
 updateGuideInfo();
 
-// ---------- 认字：甲骨文竞猜 ----------
-const QUIZ = [
-  { ch: "日", opts: ["日", "目", "口", "田"], tip: "圆的轮廓像太阳，里面的一笔是光的标记。" },
-  { ch: "月", opts: ["月", "山", "水", "口"], tip: "弯弯的月牙，中间一竖是月的纹路。" },
-  { ch: "山", opts: ["山", "火", "田", "大"], tip: "三座山峰连成一道山脉。" },
-  { ch: "水", opts: ["水", "雨", "火", "人"], tip: "中间是水流，两旁是溅起的水滴。" },
-  { ch: "人", opts: ["人", "大", "木", "月"], tip: "侧身站立的人，低头垂手。" },
-  { ch: "木", opts: ["木", "大", "火", "山"], tip: "一棵树：树干、枝丫和根。" },
-  { ch: "火", opts: ["火", "水", "山", "雨"], tip: "腾起的火苗和四溅的火星。" },
-  { ch: "目", opts: ["目", "日", "口", "田"], tip: "一只眼睛，中间是瞳孔。" },
-  { ch: "牛", opts: ["牛", "羊", "手", "竹"], tip: "正面牛头：两角与一横是面额，中竖是鼻梁。" },
-  { ch: "刀", opts: ["刀", "弓", "人", "大"], tip: "刀身与刀柄，刃口内弯。" },
-  { ch: "舟", opts: ["舟", "月", "门", "云"], tip: "船身与横向的船板。" },
-  { ch: "犬", opts: ["犬", "大", "木", "人"], tip: "侧身站立的犬形，尾巴上翘。" },
+// ---------- 认字：三关制（认形 / 知义 / 辨体） ----------
+const QUIZ_STAGES = [
+  { key: "shape", name: "认形", count: 10, lead: "这个甲骨文，是今天的哪个字？" },
+  { key: "meaning", name: "知义", count: 6, lead: "它的本义是什么？" },
+  { key: "order", name: "辨体", count: 4, lead: "左右两个字形，哪一个更早？" },
 ];
-let quizIndex = 0;
-let quizScore = 0;
-let quizWrong = false;
 const quizOptsEl = document.getElementById("quiz-options");
 const quizFeedbackEl = document.getElementById("quiz-feedback");
 const quizProgressEl = document.getElementById("quiz-progress");
+const quizLeadEl = document.getElementById("quiz-lead");
+let qs = 0;
+let qi = 0;
+let quizScore = 0;
+let quizWrong = false;
+let quizRound = [];
+let quizTimer = null;
 
-function showQuizGlyph(animate) {
-  const q = QUIZ[Math.min(quizIndex, QUIZ.length - 1)];
-  if (quizIndex >= QUIZ.length) return;
-  stage.setCloud(ensureCloud("quiz:" + q.ch + ":oracle", () => buildSingleCloud(q.ch, "oracle", 0.3)), animate ? 1.1 : false);
-  stage.setColor("#ffd9a0");
+function shuffleArr(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = a[i];
+    a[i] = a[j];
+    a[j] = t;
+  }
+  return a;
 }
 
-function renderQuizQuestion() {
-  if (quizIndex >= QUIZ.length) return;
-  const q = QUIZ[quizIndex];
+function templateSim(a, b) {
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d += a[i] * b[i];
+  return d;
+}
+
+function makeShapeQuestion(ch) {
+  const ranked = LIB.filter((c) => c !== ch)
+    .map((c) => ({ c, s: templateSim(TEMPLATES[ch], TEMPLATES[c]) }))
+    .sort((x, y) => y.s - x.s);
+  return { ch, opts: shuffleArr([ch, ...ranked.slice(0, 3).map((o) => o.c)]) };
+}
+
+function makeMeaningQuestion(ch) {
+  const others = shuffleArr(LIB.filter((c) => c !== ch && ETY[c])).slice(0, 3);
+  return { ch, opts: shuffleArr([ch, ...others]) };
+}
+
+function makeOrderQuestion(ch) {
+  const pairs = [
+    [0, 2],
+    [0, 4],
+    [1, 3],
+    [1, 4],
+    [2, 4],
+  ];
+  const p = pairs[Math.floor(Math.random() * pairs.length)];
+  const leftFirst = Math.random() < 0.5;
+  return {
+    ch,
+    left: leftFirst ? p[0] : p[1],
+    right: leftFirst ? p[1] : p[0],
+    earlier: leftFirst ? "left" : "right",
+  };
+}
+
+function startQuizRound() {
+  const lv = QUIZ_STAGES[qs];
+  const chars = shuffleArr([...LIB]).slice(0, lv.count);
+  quizRound = chars.map((ch) =>
+    lv.key === "shape" ? makeShapeQuestion(ch) : lv.key === "meaning" ? makeMeaningQuestion(ch) : makeOrderQuestion(ch)
+  );
+  qi = 0;
+  renderQuestion(true);
+}
+
+function quizGlyphCloud(q) {
+  const lv = QUIZ_STAGES[qs];
+  if (lv.key === "order") {
+    const key = "quiz:pair:" + q.ch + ":" + q.left + ":" + q.right;
+    return ensureCloud(key, () => buildPairCloud(q.ch, STAGES[q.left], STAGES[q.right]));
+  }
+  const key = "quiz:" + q.ch + ":oracle";
+  return ensureCloud(key, () => buildSingleCloud(q.ch, "oracle", 0.3));
+}
+
+function renderQuestion(animate) {
+  const lv = QUIZ_STAGES[qs];
+  const q = quizRound[qi];
+  if (!q) return;
   quizWrong = false;
+  clearTimeout(quizTimer);
+  quizLeadEl.textContent = lv.lead;
+  stage.setCloud(quizGlyphCloud(q), animate ? 1.1 : false);
+  stage.setColor("#ffd9a0");
   quizOptsEl.innerHTML = "";
-  q.opts.forEach((op) => {
+  const mkBtn = (label, val) => {
     const b = document.createElement("button");
-    b.textContent = op;
-    b.addEventListener("click", () => answerQuiz(op, b));
+    b.textContent = label;
+    b.dataset.val = val;
+    b.addEventListener("click", () => answerQuiz(b));
     quizOptsEl.appendChild(b);
-  });
+  };
+  if (lv.key === "shape") q.opts.forEach((c) => mkBtn(c, c));
+  else if (lv.key === "meaning") q.opts.forEach((c) => mkBtn(ETY[c].meaning, c));
+  else {
+    mkBtn("左边更早", "left");
+    mkBtn("右边更早", "right");
+  }
   quizFeedbackEl.textContent = "";
-  quizProgressEl.textContent = "第 " + (quizIndex + 1) + " / " + QUIZ.length + " 题 · 已认出 " + quizScore + " 个";
+  quizProgressEl.textContent = lv.name + " " + (qi + 1) + "/" + lv.count + " · 总分 " + quizScore;
 }
 
-function answerQuiz(op, btn) {
-  const q = QUIZ[quizIndex];
-  if (op === q.ch) {
+function answerQuiz(btn) {
+  const lv = QUIZ_STAGES[qs];
+  const q = quizRound[qi];
+  const val = btn.dataset.val;
+  const correct = lv.key === "order" ? val === q.earlier : val === q.ch;
+  if (correct) {
     btn.classList.add("right");
     quizOptsEl.querySelectorAll("button").forEach((b) => (b.disabled = true));
     if (!quizWrong) quizScore++;
-    quizFeedbackEl.textContent = "对！" + q.tip;
-    audio.pluck(NOTES.zhi);
+    pluckForChar(q.ch);
     stage.setCloud(ensureCloud("quiz:" + q.ch + ":regular", () => buildSingleCloud(q.ch, "regular", 0.3)), 1.0);
-    setTimeout(() => {
-      quizIndex++;
-      if (quizIndex >= QUIZ.length) {
-        showQuizEnd();
-      } else {
-        renderQuizQuestion();
-        showQuizGlyph(true);
-      }
-    }, 1700);
+    if (lv.key === "shape") {
+      quizFeedbackEl.textContent = "对！" + (ETY[q.ch] ? ETY[q.ch].note : "");
+      quizTimer = setTimeout(quizAdvance, 1700);
+    } else if (lv.key === "meaning") {
+      quizFeedbackEl.textContent = "对！『" + q.ch + "』的造字法是" + (ETY[q.ch] ? ETY[q.ch].method : "") + "。";
+      showEtyCard(q.ch);
+      quizTimer = setTimeout(() => {
+        closeEtyCard();
+        quizAdvance();
+      }, 3000);
+    } else {
+      const early = STAGE_NAMES[STAGES[Math.min(q.left, q.right)]];
+      quizFeedbackEl.textContent = "对！" + early + "更早。";
+      quizTimer = setTimeout(quizAdvance, 1800);
+    }
   } else {
     if (!quizWrong) quizWrong = true;
     btn.classList.add("wrong");
@@ -1069,18 +1203,35 @@ function answerQuiz(op, btn) {
   }
 }
 
+function quizAdvance() {
+  qi++;
+  if (qi >= quizRound.length) {
+    qs++;
+    if (qs >= QUIZ_STAGES.length) {
+      showQuizEnd();
+      return;
+    }
+    startQuizRound();
+  } else {
+    renderQuestion(true);
+  }
+}
+
 function showQuizEnd() {
   quizOptsEl.innerHTML = "";
-  quizFeedbackEl.textContent = "全部答完！你认出了 " + quizScore + " / " + QUIZ.length + " 个甲骨文。";
+  quizFeedbackEl.textContent = "";
   quizProgressEl.textContent = "";
+  const total = QUIZ_STAGES.reduce((s, x) => s + x.count, 0);
+  quizLeadEl.textContent = "三关都走完了——你读懂了 " + quizScore + " / " + total + " 个字。";
   const again = document.createElement("button");
   again.textContent = "再来一轮";
   again.style.marginTop = "12px";
   again.addEventListener("click", () => {
-    quizIndex = 0;
+    qs = 0;
+    qi = 0;
     quizScore = 0;
-    renderQuizQuestion();
-    showQuizGlyph(true);
+    quizRound = [];
+    startQuizRound();
   });
   quizOptsEl.appendChild(again);
   stage.setCloud(ensureCloud("quiz:done", () => buildTextCloud("字", L.portrait ? 260 : 300, 0.28)), 1.2);
@@ -1088,12 +1239,25 @@ function showQuizEnd() {
 
 function applyQuiz(animate) {
   if (activeId !== "quiz") return;
-  if (quizIndex >= QUIZ.length) {
+  if (qs >= QUIZ_STAGES.length) {
     showQuizEnd();
-  } else {
-    renderQuizQuestion();
-    showQuizGlyph(animate);
+    return;
   }
+  if (!quizRound.length) {
+    startQuizRound();
+  } else {
+    renderQuestion(animate);
+  }
+}
+
+// 供 dev 测试钩子：当前题的正确答案文案
+function devQuizCorrectText() {
+  const lv = QUIZ_STAGES[qs];
+  const q = quizRound[qi];
+  if (!q) return null;
+  if (lv.key === "shape") return q.ch;
+  if (lv.key === "meaning") return ETY[q.ch].meaning;
+  return q.earlier === "left" ? "左边更早" : "右边更早";
 }
 
 // ---------- 构字互动 ----------
@@ -1357,9 +1521,20 @@ if (devRaw) {
         }
       }
       if (target === "quiz") {
-        const q = QUIZ[Math.min(quizIndex, QUIZ.length - 1)];
-        const btn = [...quizOptsEl.querySelectorAll("button")].find((b) => b.textContent === q.ch);
-        if (args[0] === "go" && btn) btn.click();
+        if (args[0] === "meaning" || args[0] === "meaning-go") {
+          qs = 1;
+          quizRound = [];
+          startQuizRound();
+        }
+        if (args[0] === "order" || args[0] === "order-go") {
+          qs = 2;
+          quizRound = [];
+          startQuizRound();
+        }
+        const t = devQuizCorrectText();
+        const btn = t && [...quizOptsEl.querySelectorAll("button")].find((b) => b.textContent === t);
+        const go = args[0] === "go" || (args[0] || "").endsWith("go");
+        if (go && btn) btn.click();
       }
       if (target === "drawer") {
         tocDrawer.style.transition = "none";

@@ -538,6 +538,20 @@ main { position: relative; z-index: 2; }
   .lib-chips { gap: 5px; margin-bottom: 10px; }
 }
 
+/* 尾声：字墙 */
+#finale { align-items: flex-end; justify-content: center; padding: 0 5vw 6vh; }
+#finale .finale-caption {
+  width: min(760px, 92vw);
+  padding: 24px 34px;
+  text-align: center;
+}
+#finale .finale-caption h2 {
+  font-size: clamp(26px, 3vw, 36px);
+  letter-spacing: .2em;
+  margin-bottom: 8px;
+}
+#finale .finale-caption p { text-align: center; }
+
 /* 写字：左文右效 */
 #write { justify-content: flex-start; align-items: center; padding: 0 0 0 6vw; }
 #write .panel-inner { width: min(560px, 46vw); padding: 24px 30px; }
