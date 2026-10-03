@@ -94,7 +94,7 @@ $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
 
 ## 七、已知问题与注意事项
 
-- dev 测试钩子（`?dev=`/`#dev=`）**开始录视频前必须移除**，之后重建单文件版
+- dev 测试钩子（`?dev=`/`#dev=`）**开始录视频前必须移除**（含名字图测试旁路 `window.__noDownload` 判断），之后重建单文件版
 - 楷体已内嵌（LXGW WenKai OFL 子集），全平台一致；修改作品用字后需重跑 `tools/build_font.py`
 - 竖屏小屏下各面板高度较紧张，已做媒体查询压缩；如遇遮挡优先调 `@media (max-height: 720px)` 段
 - GitHub 推送偶发被网络重置（Gitee 稳定）；以 Gitee 为主副本；单文件版 46.6MB（含全量分片+双档字体+识别模型），首开需数秒解析，源码版首屏轻量（分片按需 fetch）
