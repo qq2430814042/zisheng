@@ -537,10 +537,12 @@ window.addEventListener("keydown", (e) => {
 
 let touchX = null;
 let touchIgnore = false;
+const TOUCH_IGNORE_SEL =
+  "input, select, button, a, canvas, #ety-card, #toc-drawer, #lib-overlay, [role=dialog]";
 window.addEventListener(
   "touchstart",
   (e) => {
-    touchIgnore = !!(e.target.closest && e.target.closest("#ink-canvas, input, button, a"));
+    touchIgnore = !!(e.target.closest && e.target.closest(TOUCH_IGNORE_SEL));
     touchX = touchIgnore ? null : e.touches[0].clientX;
   },
   { passive: true }
@@ -607,22 +609,32 @@ window.addEventListener("keydown", (e) => {
 libSearchEl.addEventListener("input", () => renderLibGrid(libSearchEl.value.trim()));
 
 let libGridLimit = 480;
-function renderLibGrid(q, more) {
-  if (!more) libGridLimit = 480;
-  let html = "";
-  let n = 0;
-  let total = 0;
+let libCells = null;
+// 只算一次：14,873 字的可用阶段与字体覆盖（首开网格时构建，之后复用）
+function ensureLibCells() {
+  if (libCells) return libCells;
+  libCells = [];
   for (const ch of EVO_CHARS) {
-    if (q && ch !== q && !ch.includes(q)) continue;
-    const ancient = evoAvailable(ch) || [];
-    if (!ancient.length) continue;
-    total++;
-    if (n >= libGridLimit) continue;
-    const title = ancient.map((s) => STAGE_NAMES[s]).join(" · ");
+    const ancient = evoAvailable(ch);
+    if (!ancient || !ancient.length) continue;
     let cls = "lib-cell";
     if (ancient[0] !== "oracle") cls += " no-oracle";
     if (!evoFontOk(ch)) cls += " no-font";
-    html += '<button class="' + cls + '" data-ch="' + ch + '" title="' + title + '">' + ch + "</button>";
+    libCells.push({ ch, cls, title: ancient.map((s) => STAGE_NAMES[s]).join(" · ") });
+  }
+  return libCells;
+}
+function renderLibGrid(q, more) {
+  if (!more) libGridLimit = 480;
+  const cells = ensureLibCells();
+  let html = "";
+  let n = 0;
+  let total = 0;
+  for (const cell of cells) {
+    if (q && cell.ch !== q && !cell.ch.includes(q)) continue;
+    total++;
+    if (n >= libGridLimit) continue;
+    html += '<button class="' + cell.cls + '" data-ch="' + cell.ch + '" title="' + cell.title + '">' + cell.ch + "</button>";
     n++;
   }
   if (total > n) {
@@ -683,8 +695,12 @@ async function loadLibChar(ch, animate) {
   if (!STROKES[ch] && evoAvailable(ch)) {
     timeNoteEl.textContent = "字形加载中…";
     timeNoteEl.classList.add("show");
-    await ensureEvo(ch);
+    const ok = await ensureEvo(ch, { retry: true });
     if (libChar !== ch) return;
+    if (!ok) {
+      timeNoteEl.textContent = "字形数据加载失败——请检查网络后重新选择该字，或刷新页面重试";
+      return;
+    }
     updateTimeNote(seq);
   }
   await document.fonts.load('64px "ZiShengKai"', ch).catch(() => {});
@@ -705,11 +721,11 @@ function timelineCloudKey(ch, stageName) {
 function showTimeline(animate) {
   const seq = seqOf(libChar) || STAGES;
   if (!STROKES[libChar] && evoAvailable(libChar)) {
-    ensureEvo(libChar).then(() => {
-      if (STROKES[libChar]) {
+    ensureEvo(libChar).then((ok) => {
+      if (ok && STROKES[libChar]) {
         if (activeId === "timeline") showTimeline(animate);
-      } else {
-        timeNoteEl.textContent = "字形数据加载失败——请检查网络后刷新重试";
+      } else if (!STROKES[libChar]) {
+        timeNoteEl.textContent = "字形数据加载失败——请检查网络后重新选择该字，或刷新页面重试";
         timeNoteEl.classList.add("show");
       }
     });
@@ -825,11 +841,13 @@ function inkBBox() {
   return { minX, minY, bw: Math.max(1, maxX - minX), bh: Math.max(1, maxY - minY) };
 }
 
-// 多字检测：笔迹整体过于扁平，多半写了不止一个字
+// 多字检测：整体过于扁平才判"写了不止一个字"
+// 注意：阈值 2.2——左右结构单字（好/明/休/林）常见宽高比 1.3–1.8，不能误伤；
+// 不用"空白列"判据（川/三/小等单字本身就有竖向空白，会误判）
 function looksMultiChar() {
   if (!inkHasContent) return false;
   const { bw, bh } = inkBBox();
-  return bw / bh > 1.6 && bw > inkCanvas.width * 0.5;
+  return bw / bh > 2.2 && bw > inkCanvas.width * 0.5;
 }
 
 function inkUndo() {
@@ -940,13 +958,28 @@ function buildInkCloud() {
   return makeClusterCloud(L.W, L.H, cluster, COUNT, drawAll, worldW, worldH);
 }
 
+// HanScribe 加载三态：idle / loading / ready / failed（失败可重试）
+let hsState = "idle";
+let hsFallbackPending = false;
+
 function applyWriteCloud() {
   if (activeId !== "write") return;
   // 懒加载增强识别引擎（12,000+ 常用字，本地模型）
   if (!hsEngine && !hsLoading) {
     loadHanScribe().then((ok) => {
-      if (ok && activeId === "write") {
+      if (!ok) {
+        if (activeId === "write" && writeMode === "free") {
+          writeHint.textContent = "离线状态：增强识别引擎不可用，已切换到快速识别（本地模板）";
+        }
+        return;
+      }
+      if (activeId === "write") {
         writeHint.textContent = "增强识别引擎已就绪——写下任意一个常用字试试";
+        // 用户在加载期间已点了粒子化（快速识别兜底）：就绪后自动重识别一次
+        if (hsFallbackPending && inkHasContent && writeMode === "free") {
+          hsFallbackPending = false;
+          particleize();
+        }
       }
     });
   }
@@ -959,7 +992,7 @@ function applyWriteCloud() {
   }
 }
 
-document.getElementById("btn-particle").addEventListener("click", () => {
+function particleize() {
   if (!inkHasContent) {
     writeHint.textContent = "先写点什么，再让粒子接住它";
     return;
@@ -986,13 +1019,21 @@ document.getElementById("btn-particle").addEventListener("click", () => {
         renderRecogCardHS(hs);
       } else {
         renderRecogCard(recognizeInk());
-        writeHint.textContent = "增强识别引擎还在加载，先用快速识别——稍后可重新粒子化";
+        if (hsState === "loading") {
+          hsFallbackPending = true;
+          writeHint.textContent = "增强识别引擎还在加载，先用快速识别——加载完成后会自动重试";
+        } else if (hsState === "failed") {
+          writeHint.textContent = "增强识别引擎不可用（离线），这是快速识别结果";
+        } else {
+          writeHint.textContent = "增强识别引擎尚未就绪，先用快速识别——稍后可重新粒子化";
+        }
       }
     }
   } else {
     writeHint.textContent = "粒子接住了。点“评分”对照描红看看像不像。";
   }
-});
+}
+document.getElementById("btn-particle").addEventListener("click", particleize);
 document.getElementById("btn-undo").addEventListener("click", inkUndo);
 document.getElementById("btn-redo").addEventListener("click", inkRedoFn);
 document.getElementById("btn-join").addEventListener("click", () => {
@@ -1108,8 +1149,28 @@ nameGenerateBtn.addEventListener("click", async () => {
 });
 
 function saveNameImage() {
+  const cloud = stage.clouds["name:user"];
+  if (!cloud) return;
+  // 固定 pixelRatio=1：不同 DPI 机器导出构图/清晰度一致
+  const prevPR = stage.renderer.getPixelRatio ? stage.renderer.getPixelRatio() : 1;
+  stage.renderer.setPixelRatio(1);
+  stage.resize();
   stage.render();
   const src = stage.renderer.domElement;
+
+  // 粒子云屏幕包围盒（每 7 个点采样一次足够精确）
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < cloud.length; i += 21) {
+    const p = stage.projectPoint(cloud[i], cloud[i + 1]);
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  if (!isFinite(minX)) {
+    minX = 0; minY = 0; maxX = src.width; maxY = src.height;
+  }
+
   const out = document.createElement("canvas");
   out.width = 1920;
   out.height = 1080;
@@ -1119,25 +1180,54 @@ function saveNameImage() {
   grad.addColorStop(1, "#14100a");
   c.fillStyle = grad;
   c.fillRect(0, 0, 1920, 1080);
-  const scale = Math.max(1920 / src.width, 1080 / src.height);
+
+  // 含边距的 fit（而非 cover），保证粒子字完整不裁边
+  const padX = 130, padTop = 210, padBottom = 175;
+  const avW = 1920 - padX * 2;
+  const avH = 1080 - padTop - padBottom;
+  const bw = Math.max(1, maxX - minX);
+  const bh = Math.max(1, maxY - minY);
+  const scale = Math.min(avW / bw, avH / bh, 4);
   const dw = src.width * scale;
   const dh = src.height * scale;
-  c.drawImage(src, (1920 - dw) / 2, (1080 - dh) / 2, dw, dh);
+  c.drawImage(src, (1920 - dw) / 2, padTop + (avH - dh) / 2, dw, dh);
+
+  // 标题 + 可读的楷体名字 + 日期
   c.fillStyle = "rgba(233,230,223,.88)";
   c.font = '46px "ZiShengKai","KaiTi","STKaiti","楷体",serif';
   c.textAlign = "left";
-  c.fillText("名字 · 星图", 84, 138);
+  c.fillText("名字 · 星图", 84, 132);
   c.fillStyle = "rgba(233,230,223,.5)";
   c.font = '24px "Microsoft YaHei",sans-serif';
-  c.fillText("《字·生》——汉字五体演变的粒子交互体验", 86, 184);
+  c.fillText("《字·生》——汉字五体演变的粒子交互体验", 86, 176);
   c.textAlign = "right";
-  c.fillText(new Date().toLocaleDateString("zh-CN"), 1836, 138);
-  const a = document.createElement("a");
-  a.download = "字生-名字星图.png";
-  a.href = out.toDataURL("image/png");
-  a.click();
+  c.fillText(new Date().toLocaleDateString("zh-CN"), 1836, 132);
+
+  const name = nameInput.value.trim().replace(/\s+/g, "").slice(0, 4);
+  c.textAlign = "center";
+  c.fillStyle = "rgba(224,179,106,.92)";
+  c.font = '76px "ZiShengKai","KaiTi","STKaiti","楷体",serif';
+  c.fillText(name, 960, 1006);
+  c.fillStyle = "rgba(233,230,223,.35)";
+  c.font = '20px "Microsoft YaHei",sans-serif';
+  c.fillText("名字的每一笔，都是汉字的三千年", 960, 1052);
+
+  // 恢复现场
+  stage.renderer.setPixelRatio(prevPR);
+  stage.resize();
+  stage.render();
+
   writeHint.textContent = "已保存图片";
   audio.pluck(NOTES.gongHigh);
+  out.toBlob((blob) => {
+    if (!blob || window.__noDownload) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.download = "字生-名字星图.png";
+    a.href = url;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }, "image/png");
 }
 nameSaveBtn.addEventListener("click", saveNameImage);
 
@@ -1296,6 +1386,7 @@ async function getHsLib() {
 
 function loadHanScribe() {
   if (hsLoading) return hsLoading;
+  hsState = "loading";
   hsLoading = (async () => {
     const mod = await getHsLib();
     let wasmBytes;
@@ -1305,8 +1396,14 @@ function loadHanScribe() {
       modelBuf = b64ToU8(window.__HS_MODEL_B64).buffer;
     } else {
       const [w, m] = await Promise.all([
-        fetch("vendor/hanscribe-inference.wasm").then((r) => r.arrayBuffer()),
-        fetch("vendor/hanscribe.hzmodel").then((r) => r.arrayBuffer()),
+        fetch("vendor/hanscribe-inference.wasm").then((r) => {
+          if (!r.ok) throw new Error("wasm http " + r.status);
+          return r.arrayBuffer();
+        }),
+        fetch("vendor/hanscribe.hzmodel").then((r) => {
+          if (!r.ok) throw new Error("model http " + r.status);
+          return r.arrayBuffer();
+        }),
       ]);
       wasmBytes = w;
       modelBuf = m;
@@ -1316,8 +1413,14 @@ function loadHanScribe() {
     hsVocab = model.vocab;
     hsLib = mod;
     window.__hsReady = true;
+    hsState = "ready";
     return true;
-  })().catch(() => false);
+  })().catch(() => {
+    // 失败：允许下次进入写字章或点击粒子化时重试（不锁死）
+    hsState = "failed";
+    hsLoading = null;
+    return false;
+  });
   return hsLoading;
 }
 
@@ -1473,7 +1576,13 @@ function renderRecogCard(ranked) {
 }
 
 // ---- 跟着写：评分 ----
+let gradeBusy = false;
 btnGrade.addEventListener("click", () => {
+  if (gradeBusy) return;
+  gradeBusy = true;
+  setTimeout(() => {
+    gradeBusy = false;
+  }, 700);
   if (!inkHasContent) {
     writeHint.textContent = "先在描红底上写一遍";
     return;
@@ -1545,8 +1654,12 @@ async function showEvolution(ch, fromKey) {
   if (!STROKES[ch] && evoAvailable(ch)) {
     timeNoteEl.textContent = "字形加载中…";
     timeNoteEl.classList.add("show");
-    await ensureEvo(ch);
+    const ok = await ensureEvo(ch, { retry: true });
     if (libChar !== ch) return;
+    if (!ok) {
+      timeNoteEl.textContent = "字形数据加载失败——请检查网络后重试";
+      return;
+    }
     updateTimeNote(seq);
   }
   await document.fonts.load('64px "ZiShengKai"', ch).catch(() => {});
@@ -2063,6 +2176,10 @@ if (devRaw) {
           setWriteMode("name");
           nameInput.value = "牛景飞";
           nameGenerateBtn.click();
+          if (args[1] === "save") {
+            window.__noDownload = true;
+            setTimeout(() => nameSaveBtn.click(), 900);
+          }
         } else {
           if (args[0] === "guide" || args[0] === "grade" || args[0] === "evolve") {
             setWriteMode("guide");

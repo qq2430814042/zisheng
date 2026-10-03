@@ -525,7 +525,8 @@ function decodeEvoStage(enc) {
 
 const evoShardCache = new Map();
 const EVO_SHARD_CACHE_MAX = 16;
-const evoAttempted = new Set();
+const evoState = new Map(); // ch -> "loading" | "done" | "failed"
+const evoPending = new Map(); // ch -> Promise<boolean>
 
 async function loadEvoShard(i) {
   if (evoShardCache.has(i)) {
@@ -534,13 +535,15 @@ async function loadEvoShard(i) {
     evoShardCache.set(i, v);
     return v;
   }
-  let data = {};
+  let data;
   if (window.__SINGLE_FILE__) {
     const el = document.getElementById("evo-shard-" + i);
-    if (el) data = JSON.parse(el.textContent);
+    if (!el) throw new Error("evo shard missing: " + i);
+    data = JSON.parse(el.textContent);
   } else {
     const r = await fetch("js/evo-data/shard-" + String(i).padStart(4, "0") + ".json");
-    if (r.ok) data = await r.json();
+    if (!r.ok) throw new Error("evo shard http " + r.status);
+    data = await r.json();
   }
   evoShardCache.set(i, data);
   while (evoShardCache.size > EVO_SHARD_CACHE_MAX) {
@@ -549,19 +552,36 @@ async function loadEvoShard(i) {
   return data;
 }
 
-export async function ensureEvo(ch) {
-  if (STROKES[ch]) return;
-  if (evoAttempted.has(ch)) return;
+// 加载并解码某字的字形数据；永不 reject，返回是否可用。
+// opts.retry=true 时允许对已失败的字重新尝试（用户显式选择该字时用）。
+export function ensureEvo(ch, opts = {}) {
+  if (STROKES[ch]) return Promise.resolve(true);
   const idx = EVO_INDEX_MAP.get(ch);
-  if (idx === undefined) return;
-  evoAttempted.add(ch);
-  const shard = await loadEvoShard(Math.floor(idx / EVO_SHARD_SIZE));
-  const stages = shard[ch];
-  if (!stages) return;
-  const slot = STROKES[ch] || (STROKES[ch] = {});
-  for (const st in stages) {
-    if (!slot[st]) slot[st] = decodeEvoStage(stages[st]);
-  }
+  if (idx === undefined) return Promise.resolve(false);
+  if (evoState.get(ch) === "failed" && !opts.retry) return Promise.resolve(false);
+  if (evoPending.has(ch)) return evoPending.get(ch);
+  const p = (async () => {
+    evoState.set(ch, "loading");
+    try {
+      const shard = await loadEvoShard(Math.floor(idx / EVO_SHARD_SIZE));
+      const stages = shard[ch];
+      if (stages) {
+        const slot = STROKES[ch] || (STROKES[ch] = {});
+        for (const st in stages) {
+          if (!slot[st]) slot[st] = decodeEvoStage(stages[st]);
+        }
+      }
+      evoState.set(ch, "done");
+      return true;
+    } catch (e) {
+      evoState.set(ch, "failed");
+      return false;
+    } finally {
+      evoPending.delete(ch);
+    }
+  })();
+  evoPending.set(ch, p);
+  return p;
 }
 
 // 该字在数据集中收录了哪些古代阶段（只读索引，不触发加载）

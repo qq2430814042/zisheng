@@ -267,6 +267,15 @@ export class ParticleStage {
     return (v.x * 0.5 + 0.5) * this.renderer.domElement.clientWidth;
   }
 
+  // 世界坐标 → 画布 CSS 像素坐标（导出海报时计算包围盒用）
+  projectPoint(x, y) {
+    const v = new THREE.Vector3(x, y, 0).project(this.camera);
+    return {
+      x: (v.x * 0.5 + 0.5) * this.renderer.domElement.clientWidth,
+      y: (1 - (v.y * 0.5 + 0.5)) * this.renderer.domElement.clientHeight,
+    };
+  }
+
   // 连续混合两个点云（用于时间轴拖动）；animate=true 时以缓动过渡到混合状态
   setBlend(keyA, keyB, t, animate = false) {
     const a = this.clouds[keyA];
