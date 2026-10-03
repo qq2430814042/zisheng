@@ -1,4 +1,4 @@
-// audio.js — 程序化音景：环境铺底 + 五声音阶拨弦
+// audio.js — 程序化音效：五声音阶拨弦（待机静音，无常驻环境铺底）
 export class AmbientAudio {
   constructor() {
     this.ctx = null;
@@ -17,35 +17,10 @@ export class AmbientAudio {
         master.gain.value = 0;
         master.connect(ctx.destination);
         this.master = master;
-
-        const padGain = ctx.createGain();
-        padGain.gain.value = 0.05;
-        padGain.connect(master);
-        const filter = ctx.createBiquadFilter();
-        filter.type = "lowpass";
-        filter.frequency.value = 420;
-        filter.connect(padGain);
-        [110, 164.81, 220].forEach((f, i) => {
-          const o = ctx.createOscillator();
-          o.type = i === 2 ? "sine" : "triangle";
-          o.frequency.value = f;
-          const g = ctx.createGain();
-          g.gain.value = 0.33;
-          o.connect(g);
-          g.connect(filter);
-          o.start();
-        });
-        const lfo = ctx.createOscillator();
-        lfo.frequency.value = 0.07;
-        const lg = ctx.createGain();
-        lg.gain.value = 0.02;
-        lfo.connect(lg);
-        lg.connect(padGain.gain);
-        lfo.start();
       }
       await this.ctx.resume();
       this.enabled = true;
-      this.master.gain.setTargetAtTime(0.6, this.ctx.currentTime, 1.2);
+      this.master.gain.setTargetAtTime(0.6, this.ctx.currentTime, 0.6);
       return true;
     } catch (e) {
       return false;
@@ -68,7 +43,7 @@ export class AmbientAudio {
       o.frequency.value = freq;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.linearRampToValueAtTime(0.22, t + 0.012);
+      g.gain.linearRampToValueAtTime(0.2, t + 0.012);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
       const lp = ctx.createBiquadFilter();
       lp.type = "lowpass";
@@ -78,6 +53,19 @@ export class AmbientAudio {
       lp.connect(this.master);
       o.start(t);
       o.stop(t + 1.8);
+
+      // 柔和低八度共鸣：只在拨弦瞬间出现，尾音自然消失（不做常驻声）
+      const sub = ctx.createOscillator();
+      sub.type = "sine";
+      sub.frequency.value = freq / 2;
+      const sg = ctx.createGain();
+      sg.gain.setValueAtTime(0.0001, t);
+      sg.gain.linearRampToValueAtTime(0.055, t + 0.04);
+      sg.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
+      sub.connect(sg);
+      sg.connect(this.master);
+      sub.start(t);
+      sub.stop(t + 2.3);
     } catch (e) {
       /* ignore */
     }
