@@ -212,53 +212,178 @@ const sections = [
 const eraName = document.getElementById("era-name");
 const mainEl = document.querySelector("main");
 const navEl = document.getElementById("nav");
-const tocItems = [];
-const drawerItems = [];
+// ---------- 目录视图（sections[] 的唯一视图；只决定"怎么呈现"，不改章节本身） ----------
+// 硬约束：不移动/增删/重排 <main> 的 section，不改 sections[] 的索引与字段
+const NAV_GROUPS = [
+  { key: "hero", name: "开篇", items: [0] },
+  { key: "evolve", name: "演变", items: [1, 2, 3, 4, 5, 6] },
+  { key: "write", name: "书写", items: [8] },
+  { key: "read", name: "辨字", items: [9, 7] },
+  { key: "data", name: "数据", items: [10] },
+  { key: "end", name: "收束", items: [11, 12] },
+];
 
-// 桌面目录：ul/li/真实锚点，五体主线与互动/说明分两组
-const navUl = document.createElement("ul");
-navEl.appendChild(navUl);
+const expandedGroups = {}; // 桌面：点击展开状态
+const mobileExpanded = {}; // 抽屉：点击展开状态
+let hoverGroup = null; // 桌面：悬停展开
+let activeGroupKey = "hero";
+const navLeafEls = {}; // sectionIndex -> [桌面元素, 抽屉元素]
+const groupHeads = {}; // key -> { desk, mob }
+const groupEls = {}; // key -> { desk, mob }
+const lightItems = []; // 首访点亮（桌面可见项）
+let tocPosEl = null;
 const drawerListEl = document.getElementById("toc-list-mobile");
 
-sections.forEach((s, i) => {
-  if (i === 6) {
-    const sep = document.createElement("li");
-    sep.className = "toc-sep";
-    sep.setAttribute("aria-hidden", "true");
-    navUl.appendChild(sep);
+function registerLeaf(idx, el, light) {
+  (navLeafEls[idx] = navLeafEls[idx] || []).push(el);
+  if (light) lightItems.push(el);
+}
+
+function buildGroup(listEl, g, mobile) {
+  const li = document.createElement("li");
+  li.className = "toc-group";
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "toc-item toc-group-head";
+  head.setAttribute("aria-expanded", "false");
+  head.innerHTML = mobile
+    ? '<span class="toc-label">' + g.name + "</span>"
+    : '<i class="toc-tick" aria-hidden="true"></i><span class="toc-label">' + g.name + "</span>";
+  if (!mobile) lightItems.push(head);
+  const sub = document.createElement("ul");
+  sub.className = "toc-group-items";
+  g.items.forEach((idx) => {
+    const s = sections[idx];
+    const sli = document.createElement("li");
+    const a = document.createElement("a");
+    a.className = "toc-item toc-sub";
+    a.href = "#" + s.id;
+    a.title = s.label;
+    a.innerHTML = mobile
+      ? '<span class="toc-label">' + s.label + '</span><i class="num">' + String(idx + 1).padStart(2, "0") + "</i>"
+      : '<i class="toc-tick" aria-hidden="true"></i><span class="toc-label">' + s.label + "</span>";
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      goTo(idx);
+      if (mobile) closeDrawer();
+    });
+    sli.appendChild(a);
+    sub.appendChild(sli);
+    registerLeaf(idx, a, false);
+  });
+  head.addEventListener("click", () => {
+    if (mobile) mobileExpanded[g.key] = !isGroupOpen(g.key, true);
+    else expandedGroups[g.key] = !isGroupOpen(g.key, false);
+    renderNavState();
+  });
+  if (!mobile) {
+    li.addEventListener("mouseenter", () => {
+      hoverGroup = g.key;
+      renderNavState();
+    });
+    li.addEventListener("mouseleave", () => {
+      if (hoverGroup === g.key) {
+        hoverGroup = null;
+        renderNavState();
+      }
+    });
   }
+  li.appendChild(head);
+  li.appendChild(sub);
+  listEl.appendChild(li);
+  groupHeads[g.key] = groupHeads[g.key] || {};
+  groupEls[g.key] = groupEls[g.key] || {};
+  groupHeads[g.key][mobile ? "mob" : "desk"] = head;
+  groupEls[g.key][mobile ? "mob" : "desk"] = li;
+}
+
+function buildHero(listEl, mobile) {
+  const s = sections[0];
   const li = document.createElement("li");
   const a = document.createElement("a");
-  a.className = "toc-item";
+  a.className = "toc-item toc-entry";
   a.href = "#" + s.id;
-  a.dataset.tier = i <= 5 ? "1" : "2";
   a.title = s.label;
-  a.innerHTML = '<span class="toc-label">' + s.label + '</span><i class="toc-tick" aria-hidden="true"></i>';
+  a.innerHTML = mobile
+    ? '<span class="toc-label">' + s.label + '</span><i class="num">01</i>'
+    : '<i class="toc-tick" aria-hidden="true"></i><span class="toc-label">' + s.label + "</span>";
   a.addEventListener("click", (e) => {
     e.preventDefault();
-    goTo(i);
+    goTo(0);
+    if (mobile) closeDrawer();
   });
   li.appendChild(a);
-  navUl.appendChild(li);
-  tocItems.push(a);
+  listEl.appendChild(li);
+  registerLeaf(0, a, !mobile);
+}
 
-  const dli = document.createElement("li");
-  const da = document.createElement("a");
-  da.href = "#" + s.id;
-  da.innerHTML = "<span>" + s.label + '</span><i class="num">' + String(i + 1).padStart(2, "0") + "</i>";
-  da.addEventListener("click", (e) => {
-    e.preventDefault();
-    goTo(i);
-    closeDrawer();
+function isGroupOpen(key, mobile) {
+  if (key === activeGroupKey) return true; // 当前组强制展开
+  if (mobile) return !!mobileExpanded[key];
+  return !!expandedGroups[key] || hoverGroup === key;
+}
+
+function renderNavState() {
+  NAV_GROUPS.forEach((g) => {
+    const deskOpen = g.key === activeGroupKey || !!expandedGroups[g.key] || hoverGroup === g.key;
+    const mobOpen = g.key === activeGroupKey || !!mobileExpanded[g.key];
+    const heads = groupHeads[g.key];
+    const els = groupEls[g.key];
+    if (!heads) return;
+    if (heads.desk) {
+      heads.desk.setAttribute("aria-expanded", deskOpen ? "true" : "false");
+      heads.desk.classList.toggle("active", g.key === activeGroupKey);
+      els.desk.classList.toggle("open", deskOpen);
+    }
+    if (heads.mob) {
+      heads.mob.setAttribute("aria-expanded", mobOpen ? "true" : "false");
+      heads.mob.classList.toggle("active", g.key === activeGroupKey);
+      els.mob.classList.toggle("open", mobOpen);
+    }
   });
-  dli.appendChild(da);
-  drawerListEl.appendChild(dli);
-  drawerItems.push(da);
-});
+}
 
-const tocPosEl = document.createElement("div");
-tocPosEl.className = "toc-pos";
-navEl.appendChild(tocPosEl);
+// 只在初始化执行一次；applySection 里只调 syncNavActive，禁止重建 DOM
+function buildNav() {
+  const inner = document.createElement("div");
+  inner.className = "toc-inner";
+  const rootUl = document.createElement("ul");
+  rootUl.className = "toc-root";
+  inner.appendChild(rootUl);
+  tocPosEl = document.createElement("div");
+  tocPosEl.className = "toc-pos";
+  inner.appendChild(tocPosEl);
+  navEl.appendChild(inner);
+
+  NAV_GROUPS.forEach((g) => {
+    if (g.key === "hero" && g.items.length === 1) {
+      buildHero(rootUl, false);
+      buildHero(drawerListEl, true);
+    } else {
+      buildGroup(rootUl, g, false);
+      buildGroup(drawerListEl, g, true);
+    }
+  });
+}
+
+function syncNavActive(sec) {
+  const idx = sections.indexOf(sec);
+  for (const key in navLeafEls) {
+    const on = Number(key) === idx;
+    navLeafEls[key].forEach((el) => {
+      el.classList.toggle("active", on);
+      if (on) el.setAttribute("aria-current", "page");
+      else el.removeAttribute("aria-current");
+    });
+  }
+  const g = NAV_GROUPS.find((gr) => gr.items.includes(idx));
+  if (g) activeGroupKey = g.key;
+  renderNavState();
+  tocPosEl.textContent = String(idx + 1).padStart(2, "0") + " / " + String(sections.length).padStart(2, "0");
+}
+
+buildNav();
+syncNavActive(sections[0]);
 
 // 尾声字墙热区：点任意字 → 看它三千年
 const finaleHotspots = document.getElementById("finale-hotspots");
@@ -340,14 +465,7 @@ function applySection(sec) {
     stage.setCloud(sec.cloud);
   }
   eraName.textContent = sec.era;
-  const syncCurrent = (el, i) => {
-    const on = sections[i].id === sec.id;
-    el.classList.toggle("active", on);
-    if (on) el.setAttribute("aria-current", "page");
-    else el.removeAttribute("aria-current");
-  };
-  tocItems.forEach(syncCurrent);
-  drawerItems.forEach(syncCurrent);
+  syncNavActive(sec);
   const noteKey = sec.id.startsWith("act-") ? sec.id.slice(4) : sec.id;
   if (STAGE_NOTE[noteKey]) audio.pluck(STAGE_NOTE[noteKey]);
 }
@@ -360,7 +478,6 @@ function goTo(i, force = false) {
   currentIndex = i;
   mainEl.style.transform = "translateX(" + -i * 100 + "vw)";
   applySection(sections[i]);
-  tocPosEl.textContent = String(i + 1).padStart(2, "0") + " / " + String(sections.length).padStart(2, "0");
   const hash = "#" + sections[i].id;
   if (location.hash !== hash) history.replaceState(null, "", hash);
 }
@@ -1856,7 +1973,7 @@ window.addEventListener("load", () => window.scrollTo(0, 0));
 try {
   if (!REDUCED && !sessionStorage.getItem("zs_nudge") && startIdx === 0) {
     sessionStorage.setItem("zs_nudge", "1");
-    tocItems.forEach((el, i) => {
+    lightItems.forEach((el, i) => {
       setTimeout(() => {
         el.classList.add("lit");
         setTimeout(() => el.classList.remove("lit"), 460);
