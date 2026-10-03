@@ -1373,7 +1373,13 @@ btnGrade.addEventListener("click", () => {
   void writeFlash.offsetWidth;
   writeFlash.classList.add("on");
   const f = inkFeatures();
-  const sim = Math.min(95, Math.round(similarity(f, TEMPLATES[guideTarget]) * 100));
+  const temps = TEMPLATES[guideTarget] || [];
+  let simRaw = 0;
+  for (const t of temps) {
+    const s = similarity(f, t);
+    if (s > simRaw) simRaw = s;
+  }
+  const sim = Math.min(95, Math.round(simRaw * 100));
   const sc = STROKE_COUNT[guideTarget];
   const mine = inkStrokes.length;
   const scText =
