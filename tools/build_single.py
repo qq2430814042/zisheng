@@ -80,8 +80,13 @@ inline = '<script type="module">\n' + full + "\n</script>"
 html = html.replace(old_tag, flag + hs_assets + "".join(shards_html) + "\n" + inline)
 
 css = read(r"css\style.css")
-ext_b64 = base64.b64encode(read_bytes(r"fonts\zisheng-kai-ext.woff2")).decode()
-css = css.replace('url("../fonts/zisheng-kai-ext.woff2")', "url(data:font/woff2;base64," + ext_b64 + ")")
+# 扩展字体为多分块（build_font.py 生成），逐个内嵌
+ext_files = sorted(glob.glob(BASE + r"\fonts\zisheng-kai-ext-*.woff2"))
+for fp in ext_files:
+    fname = fp.replace("\\", "/").rsplit("/", 1)[-1]
+    b64 = base64.b64encode(open(fp, "rb").read()).decode()
+    css = css.replace('url("../fonts/' + fname + '")', "url(data:font/woff2;base64," + b64 + ")")
+print("ext font chunks embedded:", len(ext_files))
 old_css = '<link rel="stylesheet" href="css/style.css">'
 assert old_css in html, "css link not found"
 html = html.replace(old_css, "<style>\n" + css + "\n</style>")

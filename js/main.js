@@ -47,9 +47,10 @@ function seqOf(ch) {
 
 const FONT_STACK = '"ZiShengKai","KaiTi","STKaiti","楷体","Microsoft YaHei",serif';
 
-// 内嵌楷体就绪后再构建粒子（避免用回退字体采样字形）；最多等待 3 秒
+// 内嵌楷体就绪后再构建粒子（避免用回退字体采样字形）；最多等待 3 秒。
+// 传作品实际用到的字符集：字墙/五幕在模块顶层就要栅格化，必须确保这些字符已就绪
 await Promise.race([
-  document.fonts.load('64px "ZiShengKai"').catch(() => {}),
+  document.fonts.load('64px "ZiShengKai"', LIB.join("") + "写名字").catch(() => {}),
   new Promise((r) => setTimeout(r, 3000)),
 ]);
 
@@ -667,6 +668,7 @@ function renderTimeLabels(seq) {
 }
 
 function updateTimeNote(seq) {
+  timeNoteEl.classList.remove("loading");
   const ancient = seq.filter((s) => s !== "regular");
   if (LIB.includes(libChar)) {
     timeNoteEl.classList.remove("show");
@@ -693,18 +695,23 @@ async function loadLibChar(ch, animate) {
   renderTimeLabels(seq);
   updateTimeNote(seq);
   if (!STROKES[ch] && evoAvailable(ch)) {
-    timeNoteEl.textContent = "字形加载中…";
-    timeNoteEl.classList.add("show");
+    timeNoteEl.textContent = "正在加载「" + ch + "」的字形…";
+    timeNoteEl.classList.add("show", "loading");
     const ok = await ensureEvo(ch, { retry: true });
     if (libChar !== ch) return;
     if (!ok) {
+      timeNoteEl.classList.remove("loading");
       timeNoteEl.textContent = "字形数据加载失败——请检查网络后重新选择该字，或刷新页面重试";
       return;
     }
-    updateTimeNote(seq);
+  }
+  if (!document.fonts.check('64px "ZiShengKai"', ch)) {
+    timeNoteEl.textContent = "正在加载「" + ch + "」的字体（首次使用，约 0.3–1 MB）…";
+    timeNoteEl.classList.add("show", "loading");
   }
   await document.fonts.load('64px "ZiShengKai"', ch).catch(() => {});
   if (libChar !== ch) return;
+  updateTimeNote(seq);
   if (activeId === "timeline") showTimeline(animate);
 }
 
@@ -1664,18 +1671,23 @@ async function showEvolution(ch, fromKey) {
   if (idx >= 0) goTo(idx);
   clearInterval(evolveTimer);
   if (!STROKES[ch] && evoAvailable(ch)) {
-    timeNoteEl.textContent = "字形加载中…";
-    timeNoteEl.classList.add("show");
+    timeNoteEl.textContent = "正在加载「" + ch + "」的字形…";
+    timeNoteEl.classList.add("show", "loading");
     const ok = await ensureEvo(ch, { retry: true });
     if (libChar !== ch) return;
     if (!ok) {
+      timeNoteEl.classList.remove("loading");
       timeNoteEl.textContent = "字形数据加载失败——请检查网络后重试";
       return;
     }
-    updateTimeNote(seq);
+  }
+  if (!document.fonts.check('64px "ZiShengKai"', ch)) {
+    timeNoteEl.textContent = "正在加载「" + ch + "」的字体（首次使用，约 0.3–1 MB）…";
+    timeNoteEl.classList.add("show", "loading");
   }
   await document.fonts.load('64px "ZiShengKai"', ch).catch(() => {});
   if (libChar !== ch) return;
+  updateTimeNote(seq);
   const firstKey = timelineCloudKey(ch, seq[0]);
   const maxV = (seq.length - 1) * 100;
   const startPlay = () => {
