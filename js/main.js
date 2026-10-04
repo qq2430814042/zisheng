@@ -741,6 +741,7 @@ function showTimeline(animate) {
 }
 
 rangeEl.addEventListener("input", () => {
+  clearInterval(evolveTimer); // 用户手动拖动即接管，停止自动推演
   libProgress = Number(rangeEl.value) / 100;
   if (activeId === "timeline") showTimeline(false);
 });
@@ -1014,7 +1015,12 @@ function particleize() {
       bindRecog();
       writeHint.textContent = "一次写一个字，识别会准很多";
     } else {
-      const hs = hsRecognize();
+      let hs = null;
+      try {
+        hs = hsRecognize();
+      } catch (e) {
+        hs = null;
+      }
       if (hs) {
         renderRecogCardHS(hs);
       } else {
@@ -1148,7 +1154,13 @@ nameGenerateBtn.addEventListener("click", async () => {
   nameEvolve.hidden = false;
 });
 
+let savingName = false;
 function saveNameImage() {
+  if (savingName) return;
+  savingName = true;
+  setTimeout(() => {
+    savingName = false;
+  }, 1200);
   const cloud = stage.clouds["name:user"];
   if (!cloud) return;
   // 固定 pixelRatio=1：不同 DPI 机器导出构图/清晰度一致
@@ -1669,6 +1681,11 @@ async function showEvolution(ch, fromKey) {
   const startPlay = () => {
     let v = 0;
     evolveTimer = setInterval(() => {
+      // 用户已切走章节：停止推演，避免在别的章节里悄悄改变粒子云
+      if (activeId !== "timeline" || libChar !== ch) {
+        clearInterval(evolveTimer);
+        return;
+      }
       v += 4;
       if (v >= maxV) {
         v = maxV;
@@ -1677,7 +1694,11 @@ async function showEvolution(ch, fromKey) {
       rangeEl.value = v;
       libProgress = v / 100;
       showTimeline(false);
-      if (v >= maxV) setTimeout(() => showEtyCard(ch), 700);
+      if (v >= maxV) {
+        setTimeout(() => {
+          if (activeId === "timeline" && libChar === ch) showEtyCard(ch);
+        }, 700);
+      }
     }, 55);
   };
   if (fromKey && stage.clouds[fromKey]) {
