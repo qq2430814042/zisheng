@@ -27,7 +27,7 @@ CMIT-zisheng/
 ├─ js/
 │  ├─ main.js          章节配置 sections[]、横向导航 goTo()、全部互动章节、识别引擎、dev 测试钩子
 │  ├─ particles.js     粒子引擎（点云采样 makeClusterCloud/makeDiskCloud、morph、setBlend 连续混合）
-│  ├─ glyphs.js        精选 30 字手绘笔画 STROKES、ETY 考据、STROKE_COUNT、RECOG 识别面（192 字）、drawGlyph、扩展字库懒解码（evoAvailable/ensureEvo）、CHARS/LIB/STAGES
+│  ├─ glyphs.js        精选 30 字手绘笔画 STROKES、ETY 考据、STROKE_COUNT、RECOG 识别面（196 字）、drawGlyph、扩展字库懒解码（evoAvailable/ensureEvo）、CHARS/LIB/STAGES
 │  ├─ evo-index.js     **全量字库索引**（14,874 字符表 + 阶段/字体位图，base64，~68KB，由 build_evo 生成）
 │  ├─ evo-data/        **59 个字形数据分片**（每片 256 字，JSON，共 ~31MB，按需 fetch，勿手改）
 │  └─ audio.js         程序化音效（五声音阶拨弦 + 低音共鸣；待机静音）
@@ -37,7 +37,7 @@ CMIT-zisheng/
 │  ├─ build_evo.py          从开源数据集生成 js/evo-data.js（含 --sheet 抽样自检图）
 │  ├─ ced_reader.py         character-evolution-dataset-1bit 单文件数据集读取器（Python 移植）
 │  └─ build_font.py         重新子集化楷体并注入 style.css（需 LXGW WenKai TTF，见脚本内注释）
-├─ fonts/                   内嵌字体源文件与 OFL 许可（zisheng-kai.woff2 基础 194KB / zisheng-kai-ext.woff2 扩展 3.0MB / OFL-LXGWWenKai.txt）
+├─ fonts/                   内嵌字体源文件与 OFL 许可（zisheng-kai.woff2 基础约 205KB / zisheng-kai-ext-*.woff2 扩展 5 分块（0.4–0.9MB/块） / OFL-LXGWWenKai.txt）
 ├─ 字生-单文件版.html        构建产物，双击运行
 ├─ 启动预览.bat              启动本地服务器并打开浏览器
 ├─ docs/                    提交材料（md + docx）
@@ -108,8 +108,8 @@ $edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
 - **2026-10-01（第三批）**：名字图（生成 + 保存海报）；音高按笔画数映射；认字扩题
 - **2026-10-01（第四批）**：统一副本并推送双远端；笔迹原地长成甲骨文；认字三关制；修复局部变量 `stage` 遮蔽全局粒子的命名冲突
 - **2026-10-02（第五批）**：字体内嵌（OFL 子集 + 字体就绪门）；写字四项（方区+田字格 / 多字检测 / 笔顺免责与口诀 / 名字图库外提示）；尾声字墙可点击；一字千年一键三千年；文案与文档全量同步；识别自检页上线
-- **2026-10-02（第六批）**：**识别引擎 v2**（双特征 + 领先余量 + 诚实拒识）；识别面扩至 192 字（3 角度增强）；识别成功三种走向；构字扩充至 9 组（木子→李、月月→朋、人人→从、人子→仔）；自检页改抽样 20 字
-- **2026-10-02（第七批·路线二）**：**接入 HanScribe 增强识别引擎**——WASM 推理 + 12,361 字词表模型（7.5MB）；用笔顺中轴数据做客观评测：**Top-1 97% / Top-3 100%**（100 样本，y 轴方向修正后）；应用集成（懒加载、vendor 本地文件、单文件 base64 内嵌、Top-3 点选、高置信直认），源码版与单文件版均已实测；自检页切换至 HanScribe；单文件增至 11.6MB
+- **2026-10-02（第六批）**：**识别引擎 v2**（双特征 + 领先余量 + 诚实拒识）；识别面扩至 196 字（3 角度增强）；识别成功三种走向；构字扩充至 9 组（木子→李、月月→朋、人人→从、人子→仔）；自检页改抽样 20 字
+- **2026-10-02（第七批·路线二）**：**接入 HanScribe 增强识别引擎**——WASM 推理 + 12,361 字词表模型（7.5MB）；用笔顺中轴数据（合成评测样本）做客观评测：**Top-1 97% / Top-3 100%**（100 样本，y 轴方向修正后）；应用集成（懒加载、vendor 本地文件、单文件 base64 内嵌、Top-3 点选、高置信直认），源码版与单文件版均已实测；自检页切换至 HanScribe；单文件增至 11.6MB
 - **2026-10-03（音效调整）**：移除常驻环境铺底（三振荡器 + LFO 的待机电音），改为**待机静音、交互发声**；拨弦保留五声音阶并增加柔和低八度共鸣
 - **2026-10-11（第十二批·外部审查修复）**：①**移除全部 dev 测试钩子**（`?dev=`/`#dev=`、`__noDownload`、`__hsReady`、标题镜像；`build_single.py` 增加产物断言：无 js/css/外链字体引用、分片数与索引一致、HanScribeLib 与 MIT 署名在内、dev 关键字零泄漏；原子写入；BASE 由脚本路径推导；`build_evo.py` 补 assets/dev 目录创建；`.gitignore` 锚定 /assets/）；②全局滚轮放行（指针在 #nav / #toc-drawer / #lib-overlay 内时不再 preventDefault、不切章，字库网格可滚）；③五幕首字避让文字面板（按窗口宽度反推面板右缘，整体缩放平移进右半区）；尾声字墙右移并同步热区网格；④手机端 HUD 安全区（竖屏底部 128px，320/390 实测不再遮挡按钮与文案；矮屏面板内部滚动）；⑤识别候选过滤为汉字（不再出现 F/拉丁字母）；认字点云 LRU；removeCloud 泄漏修复；时间轴边界钳制；preserveDrawingBuffer=false（导出同帧读取，海报实测 531KB）；⑥字体位图 bit5 与实际分块对齐（98 处修正）；font-display 统一 swap；去 U+3000 依赖；⑦打磨：favicon/theme-color/OG、hero 文案对比度、ink-canvas aria-label、统一 focus-visible、reduced-motion 覆盖 JS morph、面板滚动条样式
 - **2026-10-04（字体分块与加载体验）**：扩展字体由单档 3.0MB 拆为 5 个 Unicode 区块分块（生僻字仅下载所属块 0.4–0.9MB）；字体门传入作品字符集（消除字墙回退字体静默风险）；时间轴加载提示升级为金色呼吸动效并区分“字形→字体”两阶段（首次生僻字会提示字体大小）；build_single 支持多分块内嵌；源码与单文件实测生僻字（鹺 U+9E7A）font:true
