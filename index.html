@@ -25,6 +25,7 @@
     <div id="era-name">汉字五体演变</div>
   </header>
   <nav id="nav" aria-label="章节目录"></nav>
+  <button id="snap-btn" title="导出当前画面为 PNG（1920×1080）">存图</button>
   <div id="pager">
     <button id="prev-btn" aria-label="上一章">‹</button>
     <button id="next-btn" aria-label="下一章">›</button>
@@ -54,6 +55,7 @@
     <div class="hero-inner">
       <h1>字<span>·</span>生</h1>
       <p class="subtitle">汉字五体演变的粒子交互体验</p>
+      <p class="subtitle-en">An interactive particle journey through 3,000 years of Chinese characters — from oracle bone to modern type.</p>
       <p class="hint">滚轮 · 方向键 · 左右滑动 切换章节<span class="hint-extra">&nbsp;|&nbsp;点左侧目录直达任一章</span></p>
     </div>
   </section>
@@ -69,6 +71,13 @@
     <div class="act-copy">
       <h2>金文<i>商周</i></h2>
       <p>字从刀刻走上青铜。铸范使笔画变得圆浑饱满、庄重沉稳，象形的轮廓里开始有了"书写"的节奏。</p>
+    </div>
+  </section>
+
+  <section id="act-bamboo" class="act" data-stage="bamboo-silk">
+    <div class="act-copy">
+      <h2>简帛<i>战国—汉</i></h2>
+      <p>竹简与帛书上的墨迹，是五体之间最生动的过渡：毛笔的提按让圆弧拉直、笔画由转趋折——隶变的伏笔，早在书写落笔时就已埋下。</p>
     </div>
   </section>
 
@@ -181,6 +190,15 @@
         <div class="bar-row" data-value="8105"><span class="bar-label">《通用规范汉字表》 <i>今·规范收字</i></span><div class="bar-track"><div class="bar-fill"></div></div><span class="bar-num">8,105</span></div>
       </div>
       <p class="source">数据为通行统计口径，来源：《说文解字》《康熙字典》《通用规范汉字表》及甲骨学公开统计（甲骨文约 4,500 为已发现单字，其中已释读约 1,500 字）。</p>
+      <p class="bars-title">《字·生》全量字库：各阶段实际收录的历代字形数（共 14,873 字 · 28,776 个历史字形）</p>
+      <div class="bars" data-max="15000">
+        <div class="bar-row" data-value="1779"><span class="bar-label">甲骨文 <i>商城</i></span><div class="bar-track"><div class="bar-fill"></div></div><span class="bar-num">1,779</span></div>
+        <div class="bar-row" data-value="4750"><span class="bar-label">金文 <i>商周</i></span><div class="bar-track"><div class="bar-fill"></div></div><span class="bar-num">4,750</span></div>
+        <div class="bar-row" data-value="5314"><span class="bar-label">简帛 <i>战国—汉</i></span><div class="bar-track"><div class="bar-fill"></div></div><span class="bar-num">5,314</span></div>
+        <div class="bar-row" data-value="14045"><span class="bar-label">小篆 <i>《说文》</i></span><div class="bar-track"><div class="bar-fill"></div></div><span class="bar-num">14,045</span></div>
+        <div class="bar-row" data-value="2888"><span class="bar-label">隶书 <i>汉</i></span><div class="bar-track"><div class="bar-fill"></div></div><span class="bar-num">2,888</span></div>
+      </div>
+      <p class="source">上方为文献口径的收字量对比，下方为作品字库的实际收录量（来源：开源古文字数据集 character-evolution-dataset-1bit，MIT License）。</p>
     </div>
   </section>
 
@@ -199,6 +217,7 @@
       <p class="statement">创作阐述：我们相信，汉字不只是被观看的遗产，更是可以被每个人亲手书写、延续的活体。作品把三千年的字形变化压缩成一场粒子剧场，并邀请观众参与其中——让每一个字，在观看与书写中重新"活"一次。</p>
       <p>字形数据：精选 30 个基础象形字的甲骨文、金文、小篆、隶书为参照通行字形的手绘矢量笔画，并附释读考据；另将开源古文字字形数据集 character-evolution-dataset-1bit（MIT License）中的甲骨、金文、简帛、小篆、隶书字形骨架化为矢量笔画，把"一字千年"扩展到 1.4 万余字（按需分片加载，不拖慢首屏）——缺哪一阶段就诚实标注，因为有的字出生得晚。楷书与合体字采用内嵌开源楷体 LXGW WenKai（SIL OFL 1.1）渲染，全平台显示一致；全部画面与音效由程序实时生成，未使用第三方图片素材。</p>
       <p class="ai-note">AI 使用说明：本作品的创意构思、视觉设计与交互逻辑由参赛学生主导完成；研发过程使用 AI 编程助手辅助编写代码与文案，使用过程、提示词与人工修改记录均已留档，详见提交的《人工智能工具使用情况说明》。</p>
+      <p class="en-summary">English Summary — Zi Sheng ("The Living Character") is an interactive web experience on the evolution of Chinese script. About 20,000 real-time particles morph between five historical scripts — oracle bone, bronze, seal, clerical and regular — while a 14,873-character glyph library (59 on-demand shards, built from open ancient-script datasets) lets visitors push any character through its own three millennia. Visitors can compose characters from radicals (日 + 月 = 明, "sun + moon = bright"), write by hand and have it recognized offline by a bundled WASM model with a 12,000+ character lexicon, receive a personal "name constellation" poster, and test themselves in a three-stage quiz. Everything is rendered procedurally in the browser — no images, no audio files; the whole work runs offline from a single HTML file.</p>
       <p class="refs">主要参考资料：《说文解字》（东汉·许慎）、《康熙字典》（清）、《通用规范汉字表》（2013）及甲骨学公开统计资料（甲骨文已发现约 4,500 字，其中已释读约 1,500 字）。开源致谢：Three.js（MIT License）、LXGW WenKai 楷体（SIL OFL 1.1）、HanScribe 手写识别（MIT License）、character-evolution-dataset-1bit 古文字字形集（MIT License）。</p>
       <p class="credit">作者：牛景飞 · 2026 年第十四届全国大学生数字媒体科技作品及创意竞赛</p>
     </div>
@@ -211,6 +230,12 @@
       <span>扩展字库 <i id="lib-count"></i></span>
       <input id="lib-search" type="text" maxlength="2" placeholder="输入汉字筛选…" aria-label="搜索汉字">
       <button id="lib-close" aria-label="关闭">×</button>
+    </div>
+    <div class="lib-filters">
+      <select id="lib-radical" aria-label="按部首筛选"></select>
+      <select id="lib-strokes" aria-label="按笔画筛选"></select>
+      <button id="lib-random" title="从当前筛选结果中随机选一个字">随机一字</button>
+      <span id="lib-match"></span>
     </div>
     <div id="lib-grid"></div>
     <p class="lib-tip">字形数据来自开源古文字数据集（甲骨 · 金文 · 简帛 · 小篆 · 隶书，MIT License），共收录一万四千余字；无甲骨形态的字会注明"暂未见"，极生僻字以系统字体显示。点选任意字，即可在时间轴推演它的三千年。</p>

@@ -5,7 +5,7 @@
 ## 一、当前状态（2026-10-02）
 
 - 作品本体：功能完整，可运行、可演示、可提交
-- 章节结构（13 章，横向切换）：开篇 / 甲骨文 / 金文 / 小篆 / 隶书 / 楷书 / 一字千年 / 构字 / 写字 / 认字 / 字量 / 尾声 / 关于
+- 章节结构（14 章，横向切换）：开篇 / 甲骨文 / 金文 / 简帛 / 小篆 / 隶书 / 楷书 / 一字千年 / 构字 / 写字 / 认字 / 字量 / 尾声 / 关于
 - 交互能力：
   - 横向章节切换：滚轮 / 方向键 / 触屏左右滑 / 界面箭头 / 左侧两级分组目录（开篇/演变/书写/辨字/数据/收束，当前组强制展开）；深链接（#act-seal）与刷新恢复
   - 一字千年：精选 30 字手绘五体（附考据卡）+ **扩展 14,873 字**（甲骨/金文/简帛/小篆/隶书，开源数据集骨架化，59 个分片按需加载；"更多字"网格选择器）；时间轴按每字实际收录阶段动态生成（2—6 阶段），实时连续演化；"看它三千年的全过程"一键自动推演
@@ -34,7 +34,9 @@ CMIT-zisheng/
 ├─ vendor/three.module.js   Three.js r160（MIT）；vendor/hanscribe* 手写识别（MIT）
 ├─ tools/
 │  ├─ build_single.py       生成真·单文件版（内联 JS + CSS + 内嵌字体 + 识别模型）
-│  ├─ build_evo.py          从开源数据集生成 js/evo-data.js（含 --sheet 抽样自检图）
+│  ├─ build_evo.py          从开源数据集生成分片与索引（含 --sheet 抽样自检图）
+│  ├─ build_unihan.py       从 Unihan 提取部首/笔画写入 evo-index.js（字库筛选数据）
+│  ├─ fix_font_bit.py       字体覆盖位图与分块对齐的修补脚本
 │  ├─ ced_reader.py         character-evolution-dataset-1bit 单文件数据集读取器（Python 移植）
 │  └─ build_font.py         重新子集化楷体并注入 style.css（需 LXGW WenKai TTF，见脚本内注释）
 ├─ fonts/                   内嵌字体源文件与 OFL 许可（zisheng-kai.woff2 基础约 205KB / zisheng-kai-ext-*.woff2 扩展 5 分块（0.4–0.9MB/块） / OFL-LXGWWenKai.txt）

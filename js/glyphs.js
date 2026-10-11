@@ -1,6 +1,6 @@
 // glyphs.js — 字形数据与栅格化工具
 // 精选 30 字为手绘矢量笔画（100x100 坐标系）；扩展字库由开源古文字数据集骨架化生成（分片懒加载）
-import { EVO_CHARS, EVO_COUNT, EVO_BITS, EVO_SHARD_SIZE } from "./evo-index.js";
+import { EVO_CHARS, EVO_COUNT, EVO_BITS, EVO_SHARD_SIZE, EVO_RAD, EVO_STR, EVO_RADICALS } from "./evo-index.js";
 
 export const CHARS = ["日", "月", "山", "水", "人"];
 export const LIB = [
@@ -555,9 +555,9 @@ async function loadEvoShard(i) {
 // 加载并解码某字的字形数据；永不 reject，返回是否可用。
 // opts.retry=true 时允许对已失败的字重新尝试（用户显式选择该字时用）。
 export function ensureEvo(ch, opts = {}) {
-  if (STROKES[ch]) return Promise.resolve(true);
   const idx = EVO_INDEX_MAP.get(ch);
-  if (idx === undefined) return Promise.resolve(false);
+  if (idx === undefined) return Promise.resolve(!!STROKES[ch]);
+  if (evoState.get(ch) === "done") return Promise.resolve(true);
   if (evoState.get(ch) === "failed" && !opts.retry) return Promise.resolve(false);
   if (evoPending.has(ch)) return evoPending.get(ch);
   const p = (async () => {
@@ -566,6 +566,7 @@ export function ensureEvo(ch, opts = {}) {
       const shard = await loadEvoShard(Math.floor(idx / EVO_SHARD_SIZE));
       const stages = shard[ch];
       if (stages) {
+        // 精选字可能已有手绘阶段：这里只补缺失阶段（如"简帛"）
         const slot = STROKES[ch] || (STROKES[ch] = {});
         for (const st in stages) {
           if (!slot[st]) slot[st] = decodeEvoStage(stages[st]);
@@ -600,6 +601,28 @@ export function evoAvailable(ch) {
 export function evoFontOk(ch) {
   const i = EVO_INDEX_MAP.get(ch);
   return i === undefined ? false : ((EVO_BYTES[i] >> 5) & 1) === 1;
+}
+
+// ---- 部首 / 笔画（Unihan 数据，随索引内嵌） ----
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+const EVO_RAD_BYTES = b64ToBytes(EVO_RAD);
+const EVO_STR_BYTES = b64ToBytes(EVO_STR);
+
+export function evoRadical(ch) {
+  const i = EVO_INDEX_MAP.get(ch);
+  return i === undefined ? 0 : EVO_RAD_BYTES[i];
+}
+export function evoStrokes(ch) {
+  const i = EVO_INDEX_MAP.get(ch);
+  return i === undefined ? 0 : EVO_STR_BYTES[i];
+}
+export function radicalChar(n) {
+  return EVO_RADICALS[n - 1] || String(n);
 }
 
 export { EVO_CHARS, EVO_COUNT };

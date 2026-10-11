@@ -1,12 +1,13 @@
 // main.js — 叙事控制、构字互动与数据动画
 import { ParticleStage, makeClusterCloud, makeDiskCloud } from "./particles.js";
-import { CHARS, LIB, RECOG, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT, EVO_CHARS, EVO_COUNT, evoAvailable, evoFontOk, ensureEvo, STROKES } from "./glyphs.js";
+import { CHARS, LIB, RECOG, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT, EVO_CHARS, EVO_COUNT, evoAvailable, evoFontOk, ensureEvo, STROKES, evoRadical, evoStrokes, radicalChar } from "./glyphs.js";
 import { RECOG_STROKES } from "./stroke-counts.js";
 import { AmbientAudio, NOTES } from "./audio.js";
 
 const STAGE_NOTE = {
   oracle: NOTES.gong,
   bronze: NOTES.shang,
+  bamboo: NOTES.jue,
   seal: NOTES.jue,
   clerical: NOTES.zhi,
   regular: NOTES.yu,
@@ -151,6 +152,9 @@ function buildTextCloud(text, size, yRatio = 0.5) {
 stage.addCloud("idle", makeDiskCloud(COUNT, 3.4));
 stage.addCloud("idle2", makeDiskCloud(COUNT, 4.2));
 for (const s of STAGES) stage.addCloud(s, buildActCloud(s));
+// 简帛一幕：精选字补齐数据集中的"简帛"阶段（墨迹），再构建该幕点云
+for (const ch of CHARS) await ensureEvo(ch);
+stage.addCloud("act-bamboo", buildActCloud("bamboo-silk"));
 stage.addCloud("finale", buildFinaleCloud());
 
 // 单字点云（一字千年章节 / 认字章节用，按需构建）
@@ -213,6 +217,7 @@ const sections = [
   { id: "hero", label: "开篇", cloud: "idle", color: "#cfd8ff", bg: "#0b0b0f", era: "汉字五体演变", opacity: 0.85 },
   { id: "act-oracle", label: "甲骨文", cloud: "oracle", color: "#e8dcc8", bg: "#0d0c0f", era: "甲骨文 · 约公元前1300年", opacity: 1 },
   { id: "act-bronze", label: "金文", cloud: "bronze", color: "#e0a75e", bg: "#100e0a", era: "金文 · 商周", opacity: 1 },
+  { id: "act-bamboo", label: "简帛", cloud: "act-bamboo", color: "#d8c8a8", bg: "#0d0b08", era: "简帛 · 战国—汉", opacity: 1 },
   { id: "act-seal", label: "小篆", cloud: "seal", color: "#a8e0bd", bg: "#0a0f0d", era: "小篆 · 秦", opacity: 1 },
   { id: "act-clerical", label: "隶书", cloud: "clerical", color: "#d8dde8", bg: "#0b0b0e", era: "隶书 · 汉", opacity: 1 },
   { id: "act-regular", label: "楷书", cloud: "regular", color: "#f2f2f5", bg: "#090a10", era: "楷书 · 至今", opacity: 1 },
@@ -232,11 +237,11 @@ const navEl = document.getElementById("nav");
 // 硬约束：不移动/增删/重排 <main> 的 section，不改 sections[] 的索引与字段
 const NAV_GROUPS = [
   { key: "hero", name: "开篇", items: [0] },
-  { key: "evolve", name: "演变", items: [1, 2, 3, 4, 5, 6] },
-  { key: "write", name: "书写", items: [8] },
-  { key: "read", name: "辨字", items: [9, 7] },
-  { key: "data", name: "数据", items: [10] },
-  { key: "end", name: "收束", items: [11, 12] },
+  { key: "evolve", name: "演变", items: [1, 2, 3, 4, 5, 6, 7] },
+  { key: "write", name: "书写", items: [9] },
+  { key: "read", name: "辨字", items: [10, 8] },
+  { key: "data", name: "数据", items: [11] },
+  { key: "end", name: "收束", items: [12, 13] },
 ];
 
 const expandedGroups = {}; // 桌面：点击展开状态
@@ -605,12 +610,17 @@ libChipsEl.appendChild(libMoreBtn);
 const libOverlay = document.getElementById("lib-overlay");
 const libGridEl = document.getElementById("lib-grid");
 const libSearchEl = document.getElementById("lib-search");
+const libRadSel = document.getElementById("lib-radical");
+const libStrSel = document.getElementById("lib-strokes");
+const libMatchEl = document.getElementById("lib-match");
 document.getElementById("lib-count").textContent = EVO_COUNT.toLocaleString("zh-CN") + " 字";
 libMoreBtn.addEventListener("click", () => {
   libOverlay.classList.add("open");
   libOverlay.setAttribute("aria-hidden", "false");
   libSearchEl.value = "";
-  renderLibGrid("");
+  libRadSel.value = "0";
+  libStrSel.value = "0";
+  renderLibGrid(false);
   libSearchEl.focus();
 });
 function closeLibOverlay() {
@@ -624,11 +634,10 @@ libOverlay.addEventListener("click", (e) => {
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && libOverlay.classList.contains("open")) closeLibOverlay();
 });
-libSearchEl.addEventListener("input", () => renderLibGrid(libSearchEl.value.trim()));
 
 let libGridLimit = 480;
 let libCells = null;
-// 只算一次：14,873 字的可用阶段与字体覆盖（首开网格时构建，之后复用）
+// 只算一次：14,873 字的可用阶段、字体覆盖与部首/笔画（首开网格时构建，之后复用）
 function ensureLibCells() {
   if (libCells) return libCells;
   libCells = [];
@@ -638,35 +647,73 @@ function ensureLibCells() {
     let cls = "lib-cell";
     if (ancient[0] !== "oracle") cls += " no-oracle";
     if (!evoFontOk(ch)) cls += " no-font";
-    libCells.push({ ch, cls, title: ancient.map((s) => STAGE_NAMES[s]).join(" · ") });
+    libCells.push({
+      ch,
+      cls,
+      title: ancient.map((s) => STAGE_NAMES[s]).join(" · "),
+      rad: evoRadical(ch),
+      st: evoStrokes(ch),
+    });
   }
   return libCells;
 }
-function renderLibGrid(q, more) {
+
+// 部首 / 笔画下拉：全部 + 214 部首 / 36 画
+(function fillLibFilters() {
+  let opts = '<option value="0">全部部首</option>';
+  for (let n = 1; n <= 214; n++) {
+    opts += '<option value="' + n + '">' + radicalChar(n) + " " + n + " 部</option>";
+  }
+  libRadSel.innerHTML = opts;
+  opts = '<option value="0">全部笔画</option>';
+  for (let n = 1; n <= 36; n++) {
+    opts += '<option value="' + n + '">' + n + " 画</option>";
+  }
+  libStrSel.innerHTML = opts;
+})();
+
+function libFilteredCells() {
+  const q = libSearchEl.value.trim();
+  const r = Number(libRadSel.value) || 0;
+  const s = Number(libStrSel.value) || 0;
+  return ensureLibCells().filter(
+    (c) => (!q || c.ch === q || c.ch.includes(q)) && (!r || c.rad === r) && (!s || c.st === s)
+  );
+}
+
+function renderLibGrid(more) {
   if (!more) libGridLimit = 480;
-  const cells = ensureLibCells();
+  const matches = libFilteredCells();
+  const total = matches.length;
+  const n = Math.min(total, libGridLimit);
   let html = "";
-  let n = 0;
-  let total = 0;
-  for (const cell of cells) {
-    if (q && cell.ch !== q && !cell.ch.includes(q)) continue;
-    total++;
-    if (n >= libGridLimit) continue;
+  for (let i = 0; i < n; i++) {
+    const cell = matches[i];
     html += '<button class="' + cell.cls + '" data-ch="' + cell.ch + '" title="' + cell.title + '">' + cell.ch + "</button>";
-    n++;
   }
   if (total > n) {
     html += '<button class="lib-cell lib-loadmore" id="lib-loadmore">显示更多（还有 ' + (total - n) + " 字）</button>";
   }
   libGridEl.innerHTML = html || '<p class="lib-empty">没有找到这个字</p>';
+  libMatchEl.textContent = total ? "共 " + total.toLocaleString("zh-CN") + " 字" : "";
   const lm = document.getElementById("lib-loadmore");
   if (lm) {
     lm.addEventListener("click", () => {
       libGridLimit += 480;
-      renderLibGrid(q, true);
+      renderLibGrid(true);
     });
   }
 }
+libSearchEl.addEventListener("input", () => renderLibGrid(false));
+libRadSel.addEventListener("change", () => renderLibGrid(false));
+libStrSel.addEventListener("change", () => renderLibGrid(false));
+document.getElementById("lib-random").addEventListener("click", () => {
+  const matches = libFilteredCells();
+  if (!matches.length) return;
+  const pick = matches[Math.floor(Math.random() * matches.length)];
+  closeLibOverlay();
+  loadLibChar(pick.ch, true);
+});
 libGridEl.addEventListener("click", (e) => {
   const b = e.target.closest(".lib-cell[data-ch]");
   if (!b) return;
@@ -1266,6 +1313,73 @@ function saveNameImage() {
   }, "image/png");
 }
 nameSaveBtn.addEventListener("click", saveNameImage);
+
+// ---- 导出当前画面（任意章节，一键保存 1920×1080 PNG） ----
+function exportSnapshot() {
+  const prevPR = stage.renderer.getPixelRatio ? stage.renderer.getPixelRatio() : 1;
+  stage.renderer.setPixelRatio(1);
+  stage.resize();
+  stage.render();
+  const src = stage.renderer.domElement;
+  const out = document.createElement("canvas");
+  out.width = 1920;
+  out.height = 1080;
+  const c = out.getContext("2d");
+  const scale = Math.max(1920 / src.width, 1080 / src.height);
+  const dw = src.width * scale;
+  const dh = src.height * scale;
+  c.drawImage(src, (1920 - dw) / 2, (1080 - dh) / 2, dw, dh);
+  // 底部信息带
+  const grad = c.createLinearGradient(0, 780, 0, 1080);
+  grad.addColorStop(0, "rgba(6,6,10,0)");
+  grad.addColorStop(1, "rgba(6,6,10,.8)");
+  c.fillStyle = grad;
+  c.fillRect(0, 760, 1920, 320);
+  const label = (sections[currentIndex] && sections[currentIndex].label) || "《字·生》";
+  const era = eraName.textContent || "";
+  c.fillStyle = "rgba(233,230,223,.92)";
+  c.font = '54px "ZiShengKai","KaiTi","STKaiti","楷体",serif';
+  c.textAlign = "left";
+  c.fillText(label, 84, 1008);
+  c.fillStyle = "rgba(233,230,223,.55)";
+  c.font = '26px "Microsoft YaHei",sans-serif';
+  c.fillText("《字·生》——汉字五体演变的粒子交互体验" + (era && era !== label ? " · " + era : ""), 86, 1052);
+  c.textAlign = "right";
+  c.font = '24px "Microsoft YaHei",sans-serif';
+  c.fillText(new Date().toLocaleDateString("zh-CN"), 1836, 1008);
+  stage.renderer.setPixelRatio(prevPR);
+  stage.resize();
+  stage.render();
+  out.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.download = "字生-" + label + ".png";
+    a.href = url;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }, "image/png");
+  audio.pluck(NOTES.gongHigh);
+}
+
+const snapBtn = document.getElementById("snap-btn");
+let snapBusy = false;
+snapBtn.addEventListener("click", () => {
+  if (snapBusy) return;
+  snapBusy = true;
+  snapBtn.classList.add("busy");
+  snapBtn.textContent = "已保存 ✓";
+  try {
+    exportSnapshot();
+  } catch (e) {
+    snapBtn.textContent = "导出失败";
+  }
+  setTimeout(() => {
+    snapBusy = false;
+    snapBtn.classList.remove("busy");
+    snapBtn.textContent = "存图";
+  }, 1200);
+});
 
 // ---- 识别引擎：覆盖网格 + 笔画方向直方图 双特征，余弦相似度 ----
 const FEAT_N = 14;
@@ -2085,12 +2199,17 @@ const dataEl = document.getElementById("data");
 const barsIO = new IntersectionObserver((entries) => {
   entries.forEach((e) => {
     if (!e.isIntersecting) return;
-    dataEl.querySelectorAll(".bar-row").forEach((row, i) => {
-      const v = Number(row.dataset.value);
-      const fill = row.querySelector(".bar-fill");
-      setTimeout(() => {
-        fill.style.width = ((v / 47035) * 100).toFixed(1) + "%";
-      }, 120 * i);
+    let k = 0;
+    dataEl.querySelectorAll(".bars").forEach((box) => {
+      const max = Number(box.dataset.max) || 47035;
+      box.querySelectorAll(".bar-row").forEach((row) => {
+        const v = Number(row.dataset.value);
+        const fill = row.querySelector(".bar-fill");
+        const delay = 120 * k++;
+        setTimeout(() => {
+          fill.style.width = ((v / max) * 100).toFixed(1) + "%";
+        }, delay);
+      });
     });
     barsIO.disconnect();
   });
