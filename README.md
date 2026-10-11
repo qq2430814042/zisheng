@@ -75,8 +75,15 @@ python -m http.server 8017
 
 ## 交付前检查
 
-- [ ] 所有页面在 Chrome / Edge 正常，手机竖屏正常
-- [ ] 四个互动完好：一字千年时间轴、构字合成、写字粒子化、认字答题
-- [ ] 文档中作者、学校信息填写完整
-- [ ] 移除开发用测试钩子（js/main.js 中 `?dev=`/`#dev=` 分支）与 assets 目录
-- [ ] 移除测试钩子后重新生成单文件版：`python tools/build_single.py`
+- [x] 所有页面在 Chrome / Edge 正常，手机竖屏正常（390×844 / 320×568 已实测）
+- [x] 五个互动完好：一字千年时间轴、构字合成、写字识别、名字图、认字答题
+- [ ] 文档中作者、学校、**指导教师**信息填写完整（待补）
+- [x] 已移除开发用测试钩子（`?dev=`/`#dev=` 与下载旁路全部删除；`tools/build_single.py` 内含产物断言防回归）
+- [ ] 单文件版重建：`python tools/build_single.py`（当前产物已为去钩子版本）
+- [ ] 提交材料：5–10 张 JPG 运行截图（待生成）、视频/PPT、承诺书
+
+## 构建顺序（改动素材后）
+
+1. `python tools/build_font.py`（需 LXGW WenKai 完整 TTF，见脚本头注释）
+2. `python tools/build_evo.py`（刷新字库与字体覆盖位图）
+3. `python tools/build_single.py`（单文件版，含产物完整性断言）

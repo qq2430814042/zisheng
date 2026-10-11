@@ -439,8 +439,8 @@ def main():
         for p, off in STAGE_BIT.items():
             if p in st:
                 b |= 1 << off
-        if ch in covered:
-            b |= 1 << FONT_BIT
+        if ch in covered and 0x3400 <= ord(ch) <= 0x9FFF:
+            b |= 1 << FONT_BIT  # 只标记实际有字体分块覆盖的 BMP CJK 区间
         bits.append(b)
     b64 = base64.b64encode(bytes(bits)).decode()
     idx_js = "\n".join([
@@ -506,6 +506,7 @@ def main():
     print("chars:", stats["chars"], "none:", stats["none"])
     for st in ["oracle", "bronze", "bamboo-silk", "seal", "clerical"]:
         print("  ", st, stats[st])
+    os.makedirs(os.path.join(ROOT, "assets", "dev"), exist_ok=True)
     json.dump(picked_log, open(os.path.join(ROOT, "assets", "dev", "evo_picks_all.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=0)
 
 

@@ -4,6 +4,11 @@ root = r"D:\CMIT-zisheng"
 tmp = r"C:\Users\roman\AppData\Local\Temp\opencode\font"
 ttf = os.path.join(tmp, "LXGWWenKai-Regular.ttf")
 
+# 需要 LXGW WenKai 完整 TTF（约 19MB）作为子集化源：
+#   GitHub Releases: https://github.com/lxgw/LxgwWenKai/releases （LXGWWenKai-Regular.ttf）
+#   Gitee 镜像: https://gitee.com/mirrors/LxgwWenKai
+# 放到 tmp 目录（默认 C:\Users\<用户>\AppData\Local\Temp\opencode\font\LXGWWenKai-Regular.ttf）后运行本脚本。
+# 顺序：build_font.py → build_evo.py（刷新字体位图）→ build_single.py
 BASE_FILES = ["index.html", r"js\main.js", r"js\glyphs.js", r"js\particles.js", r"js\audio.js"]
 
 # 扩展字体分块（与 build_single.py 的嵌入逻辑、css 的 unicode-range 一致）
@@ -24,7 +29,7 @@ def collect_base():
         for ch in s:
             if "\u4e00" <= ch <= "\u9fff":
                 need.add(ch)
-    for ch in " ．·、，。：；？！《》〈〉（）【】—…“”‘’「」『』％＋－×÷＝":
+    for ch in " ．·、，。：；？！《》〈〉（）【】—…“”‘’「」『』％＋－×÷＝　":
         need.add(ch)
     for i in range(0x20, 0x7F):
         need.add(chr(i))
@@ -76,7 +81,7 @@ def build_css_faces(base_out, chunks):
         '  font-family: "ZiShengKai";\n'
         "  font-style: normal;\n"
         "  font-weight: 400;\n"
-        "  font-display: block;\n"
+        "  font-display: swap;\n"
         '  src: url(data:font/woff2;base64,' + b64 + ') format("woff2");\n'
         "}\n\n"
     )

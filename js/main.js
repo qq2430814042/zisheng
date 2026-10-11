@@ -72,6 +72,7 @@ stage.setWorld(worldW, worldH);
 // 桌面端采用"左文右效"布局：粒子效果集中在右半区，左侧留给文字面板
 const SIDE = !L.portrait;
 const REDUCED = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+stage.reduced = REDUCED;
 function shiftCloud(pos, dx, dy, s) {
   for (let i = 0; i < pos.length; i += 3) {
     pos[i] = pos[i] * s + dx;
@@ -108,7 +109,19 @@ function buildActCloud(stageName) {
     cells.forEach((c) => drawGlyph(ctx, c.ch, stageName, c.cx, c.cy, c.size));
   };
   const pos = makeClusterCloud(L.W, L.H, clusters, COUNT, drawAll, worldW, worldH);
-  if (SIDE) shiftCloud(pos, 3.0, 0, 0.8);
+  if (SIDE) {
+    // 让开左侧文字面板：按实际窗口宽度反推面板右缘（世界坐标），
+    // 五个字（±5.82 世界单位中心跨度 + 1.167 单字半宽）整体缩放平移进右半区
+    const vw = Math.max(761, window.innerWidth);
+    const padLeft = Math.max(0.06 * vw + 96, 196);
+    const panelRightPx = padLeft + Math.min(450, 0.4 * vw);
+    const worldPerPx = worldW / vw;
+    const leftWorld = (panelRightPx + 40) * worldPerPx - worldW / 2;
+    const rightWorld = worldW / 2 - 0.25;
+    const halfSpan = 5.82 + 1.167;
+    const s = Math.min(0.8, (rightWorld - leftWorld) / (halfSpan * 2));
+    shiftCloud(pos, leftWorld + halfSpan * s, 0, s);
+  }
   return pos;
 }
 function buildTextCloud(text, size, yRatio = 0.5) {
@@ -167,11 +180,13 @@ function buildPairCloud(ch, stageA, stageB) {
   return makeClusterCloud(L.W, L.H, clusters, COUNT, drawAll, worldW, worldH);
 }
 
-// 尾声：30 字字墙（10×3 或 6×5 网格）
+// 尾声：30 字字墙（10×3 或 6×5 网格；桌面右移让开左侧目录）
 function buildFinaleCloud() {
   const cols = L.portrait ? 6 : 10;
   const rows = L.portrait ? 5 : 3;
-  const cellW = L.W / cols;
+  const startX = L.portrait ? 0 : L.W * 0.17;
+  const spanW = L.portrait ? L.W : L.W * 0.82;
+  const cellW = spanW / cols;
   const cellH = (L.H * 0.6) / rows;
   const size = Math.min(cellW, cellH) * 0.62;
   const y0 = L.H * 0.12 + cellH / 2;
@@ -179,7 +194,7 @@ function buildFinaleCloud() {
   LIB.forEach((ch, i) => {
     const c = i % cols;
     const r = Math.floor(i / cols);
-    cells.push({ ch, cx: cellW * (c + 0.5), cy: y0 + r * cellH });
+    cells.push({ ch, cx: startX + cellW * (c + 0.5), cy: y0 + r * cellH });
   });
   const clusters = cells.map((c) => ({
     x: c.cx - size / 2 - 12,
@@ -493,6 +508,8 @@ let wheelLockUntil = 0;
 window.addEventListener(
   "wheel",
   (e) => {
+    // 浮层 / 抽屉 / 目录 / 字库网格内部滚动优先：放行，不拦滚轮、不切章节
+    if (e.target && e.target.closest && e.target.closest("#lib-overlay, #toc-drawer, #nav")) return;
     e.preventDefault();
     const now = performance.now();
     if (now < wheelLockUntil) return;
@@ -738,7 +755,7 @@ function showTimeline(animate) {
     });
     return;
   }
-  const i = Math.min(seq.length - 2, Math.floor(libProgress));
+  const i = Math.max(0, Math.min(seq.length - 2, Math.floor(libProgress)));
   const t = Math.min(1, libProgress - i);
   const keyA = timelineCloudKey(libChar, seq[i]);
   const keyB = timelineCloudKey(libChar, seq[i + 1]);
@@ -1239,7 +1256,7 @@ function saveNameImage() {
   writeHint.textContent = "已保存图片";
   audio.pluck(NOTES.gongHigh);
   out.toBlob((blob) => {
-    if (!blob || window.__noDownload) return;
+    if (!blob) return;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.download = "字生-名字星图.png";
@@ -1431,7 +1448,6 @@ function loadHanScribe() {
     hsEngine = await mod.createWasmEngine(wasmBytes, model.header, model.weights);
     hsVocab = model.vocab;
     hsLib = mod;
-    window.__hsReady = true;
     hsState = "ready";
     return true;
   })().catch(() => {
@@ -1458,7 +1474,10 @@ function hsRecognize() {
   if (!strokes.length) return null;
   const { data, numSegments } = hsLib.preprocessStrokes(strokes);
   const res = hsEngine.runInference(data, numSegments, 5);
-  return res.indices.map((idx, k) => ({ ch: hsVocab[idx], score: res.scores[k] }));
+  // 只保留汉字候选（HanScribe 词表含拉丁字母等，过滤后再取 Top-3）
+  const isHan = (ch) => /^[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]$/.test(ch);
+  const out = res.indices.map((idx, k) => ({ ch: hsVocab[idx], score: res.scores[k] })).filter((r) => isHan(r.ch));
+  return out.length ? out : null;
 }
 
 // 增强引擎结果卡：高置信直接确认，否则 Top-3 点选
@@ -1834,14 +1853,24 @@ function startQuizRound() {
   renderQuestion(true);
 }
 
+const quizLRU = [];
 function quizGlyphCloud(q) {
   const lv = QUIZ_STAGES[qs];
+  let key;
+  let k;
   if (lv.key === "order") {
-    const key = "quiz:pair:" + q.ch + ":" + q.left + ":" + q.right;
-    return ensureCloud(key, () => buildPairCloud(q.ch, STAGES[q.left], STAGES[q.right]));
+    key = "quiz:pair:" + q.ch + ":" + q.left + ":" + q.right;
+    k = ensureCloud(key, () => buildPairCloud(q.ch, STAGES[q.left], STAGES[q.right]));
+  } else {
+    key = "quiz:" + q.ch + ":oracle";
+    k = ensureCloud(key, () => buildSingleCloud(q.ch, "oracle", 0.3));
   }
-  const key = "quiz:" + q.ch + ":oracle";
-  return ensureCloud(key, () => buildSingleCloud(q.ch, "oracle", 0.3));
+  // 认字点云 LRU：一轮 20 题 + 多轮不再无限累积
+  if (!quizLRU.includes(k)) {
+    quizLRU.push(k);
+    while (quizLRU.length > 24) stage.removeCloud(quizLRU.shift());
+  }
+  return k;
 }
 
 function renderQuestion(animate) {
@@ -1954,14 +1983,6 @@ function applyQuiz(animate) {
 }
 
 // 供 dev 测试钩子：当前题的正确答案文案
-function devQuizCorrectText() {
-  const lv = QUIZ_STAGES[qs];
-  const q = quizRound[qi];
-  if (!q) return null;
-  if (lv.key === "shape") return q.ch;
-  if (lv.key === "meaning") return ETY[q.ch].meaning;
-  return q.earlier === "left" ? "左边更早" : "右边更早";
-}
 
 // ---------- 构字互动 ----------
 const CHIPS = ["日", "月", "木", "人", "女", "子"];
@@ -2131,156 +2152,6 @@ try {
 }
 
 window.addEventListener("resize", () => stage.resize());
-
-// DEV 测试钩子（交付前移除）：?dev=solo:timeline:木:250 / solo:write:go / solo:quiz:go / solo:combine:日月:go
-// 也支持 ?dev=go:5 直接跳章节、?dev=timeline:木:250 等
-const devRaw = new URLSearchParams(location.search).get("dev") ||
-  (location.hash.startsWith("#dev=") ? decodeURIComponent(location.hash.slice(5)) : "");
-if (devRaw) {
-  setTimeout(() => {
-    const parts = devRaw.split(":");
-    const solo = parts[0] === "solo";
-    const target = solo ? parts[1] : parts[0];
-    const args = solo ? parts.slice(2) : parts.slice(1);
-    if (solo) {
-      const origBlend = stage.setBlend.bind(stage);
-      stage.setBlend = (a, b, t) => {
-        window.__lastKey = a + "|" + b + "@" + t.toFixed(2);
-        return origBlend(a, b, t, false);
-      };
-      stage.setCloud = (k) => {
-        window.__lastKey = k;
-        if (stage.clouds[k]) stage.setInitialCloud(k);
-      };
-      setInterval(() => {
-        document.title =
-          (window.__lastKey || "-") +
-          " | ch:" +
-          libChar +
-          " | font:" +
-          document.fonts.check('64px "ZiShengKai"', libChar);
-      }, 500);
-      for (const s of sections) {
-        const el = document.getElementById(s.id);
-        if (s.id !== target) el.style.display = "none";
-      }
-      const idx = sections.findIndex((s) => s.id === target);
-      if (idx >= 0) {
-        currentIndex = idx;
-        applySection(sections[idx]);
-      }
-      mainEl.style.transition = "none";
-      mainEl.style.transform = "translateX(0)";
-    } else if (target === "go") {
-      mainEl.style.transition = "none";
-      goTo(Number(args[0]) || 0, true);
-    } else {
-      mainEl.style.transition = "none";
-      const idx = sections.findIndex((s) => s.id === target);
-      if (idx >= 0) goTo(idx, true);
-    }
-    setTimeout(() => {
-      if (target === "timeline") {
-        if (args[0] === "grid") {
-          renderLibGrid("");
-          libOverlay.classList.add("open");
-          libOverlay.setAttribute("aria-hidden", "false");
-        } else if (args[0]) {
-          loadLibChar(args[0], false);
-        } else {
-          syncLibChips();
-        }
-        if (args[1] !== undefined) {
-          libProgress = Number(args[1]) / 100;
-          rangeEl.value = args[1];
-        }
-        showTimeline(true);
-      }
-      if (target === "combine") {
-        const chars = (args[0] || "").split("").filter(Boolean);
-        chars.forEach((ch) => {
-          const b = chipsEl.querySelector('[data-ch="' + ch + '"]');
-          if (b) b.click();
-        });
-        if (args[1] === "go") btnCombine.click();
-      }
-      if (target === "write") {
-        if (args[0] === "name") {
-          setWriteMode("name");
-          nameInput.value = "牛景飞";
-          nameGenerateBtn.click();
-          if (args[1] === "save") {
-            window.__noDownload = true;
-            setTimeout(() => nameSaveBtn.click(), 900);
-          }
-        } else {
-          if (args[0] === "guide" || args[0] === "grade" || args[0] === "evolve") {
-            setWriteMode("guide");
-            guideCharSel.value = "牛";
-            updateGuideInfo();
-          }
-          const mk = (pts) => {
-            const st = pts.map(([x, y]) => ({ x, y, w: 7 }));
-            inkStrokes.push(st);
-            inkCtx.strokeStyle = "rgba(233,230,223,.85)";
-            inkCtx.lineWidth = 7;
-            inkCtx.lineCap = "round";
-            inkCtx.lineJoin = "round";
-            inkCtx.beginPath();
-            inkCtx.moveTo(st[0].x, st[0].y);
-            for (let i = 1; i < st.length; i++) inkCtx.lineTo(st[i].x, st[i].y);
-            inkCtx.stroke();
-          };
-          mk([[240, 150], [270, 132], [300, 128], [330, 132], [360, 150]]);
-          mk([[300, 140], [300, 440]]);
-          mk([[230, 270], [370, 270]]);
-          inkHasContent = true;
-          if (args[0] === "hsgo") {
-            // 等增强引擎就绪后再粒子化（测试用）
-            let n = 0;
-            const iv = setInterval(() => {
-              n++;
-              if (window.__hsReady || n > 80) {
-                clearInterval(iv);
-                document.getElementById("btn-particle").click();
-              }
-            }, 250);
-          } else if (args[0] === "go") {
-            document.getElementById("btn-particle").click();
-          }
-          if (args[0] === "grade") document.getElementById("btn-grade").click();
-          if (args[0] === "evolve") {
-            document.getElementById("btn-grade").click();
-            setTimeout(() => {
-              const b = recogCard.querySelector("[data-evolve]");
-              if (b) b.click();
-            }, 600);
-          }
-        }
-      }
-      if (target === "quiz") {
-        if (args[0] === "meaning" || args[0] === "meaning-go") {
-          qs = 1;
-          quizRound = [];
-          startQuizRound();
-        }
-        if (args[0] === "order" || args[0] === "order-go") {
-          qs = 2;
-          quizRound = [];
-          startQuizRound();
-        }
-        const t = devQuizCorrectText();
-        const btn = t && [...quizOptsEl.querySelectorAll("button")].find((b) => b.textContent === t);
-        const go = args[0] === "go" || (args[0] || "").endsWith("go");
-        if (go && btn) btn.click();
-      }
-      if (target === "drawer") {
-        tocDrawer.style.transition = "none";
-        openDrawer();
-      }
-    }, 700);
-  }, 900);
-}
 
 let last = performance.now();
 function loop(now) {

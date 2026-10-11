@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>字·生 —— 汉字五体演变的粒子交互体验</title>
-<meta name="description" content="以数万粒子重构汉字五体演变：甲骨文、金文、小篆、隶书、楷书。">
+<meta name="description" content="以数万粒子重构汉字五体演变：甲骨文、金文、篆隶楷与一万四千余字字形库，可写、可认、可推演。">
+<meta name="theme-color" content="#0b0b0f">
+<meta property="og:title" content="字·生 —— 汉字五体演变的粒子交互体验">
+<meta property="og:description" content="以数万粒子重构汉字演变：甲骨文到楷书，一字千年；写下任意一个字，看它的三千年。">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0b0f'/%3E%3Ctext x='32' y='45' font-size='40' text-anchor='middle' fill='%23e0b36a' font-family='KaiTi,STKaiti,serif'%3E%E5%AD%97%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -49,7 +54,7 @@
     <div class="hero-inner">
       <h1>字<span>·</span>生</h1>
       <p class="subtitle">汉字五体演变的粒子交互体验</p>
-      <p class="hint">滚轮 · 方向键 · 左右滑动 切换章节<span class="hint-extra">　|　点左侧目录直达任一章</span></p>
+      <p class="hint">滚轮 · 方向键 · 左右滑动 切换章节<span class="hint-extra">&nbsp;|&nbsp;点左侧目录直达任一章</span></p>
     </div>
   </section>
 
@@ -137,7 +142,7 @@
         <span id="guide-info"></span>
       </div>
       <div class="write-wrap">
-        <canvas id="ink-canvas" width="560" height="560"></canvas>
+        <canvas id="ink-canvas" width="560" height="560" aria-label="手写区：按住书写任意一笔字"></canvas>
         <div class="write-actions">
           <button id="btn-particle">粒子化</button>
           <button id="btn-grade" hidden>评分</button>
@@ -195,7 +200,7 @@
       <p>字形数据：精选 30 个基础象形字的甲骨文、金文、小篆、隶书为参照通行字形的手绘矢量笔画，并附释读考据；另将开源古文字字形数据集 character-evolution-dataset-1bit（MIT License）中的甲骨、金文、简帛、小篆、隶书字形骨架化为矢量笔画，把"一字千年"扩展到 1.4 万余字（按需分片加载，不拖慢首屏）——缺哪一阶段就诚实标注，因为有的字出生得晚。楷书与合体字采用内嵌开源楷体 LXGW WenKai（SIL OFL 1.1）渲染，全平台显示一致；全部画面与音效由程序实时生成，未使用第三方图片素材。</p>
       <p class="ai-note">AI 使用说明：本作品的创意构思、视觉设计与交互逻辑由参赛学生主导完成；研发过程使用 AI 编程助手辅助编写代码与文案，使用过程、提示词与人工修改记录均已留档，详见提交的《人工智能工具使用情况说明》。</p>
       <p class="refs">主要参考资料：《说文解字》（东汉·许慎）、《康熙字典》（清）、《通用规范汉字表》（2013）及甲骨学公开统计资料（甲骨文已发现约 4,500 字，其中已释读约 1,500 字）。开源致谢：Three.js（MIT License）、LXGW WenKai 楷体（SIL OFL 1.1）、HanScribe 手写识别（MIT License）、character-evolution-dataset-1bit 古文字字形集（MIT License）。</p>
-      <p class="credit">作者：牛景飞　2026 年第十四届全国大学生数字媒体科技作品及创意竞赛</p>
+      <p class="credit">作者：牛景飞 · 2026 年第十四届全国大学生数字媒体科技作品及创意竞赛</p>
     </div>
   </section>
 </main>

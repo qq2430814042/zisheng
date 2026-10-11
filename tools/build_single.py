@@ -1,7 +1,10 @@
 import re
 import base64
+import os
+import glob
 
-BASE = r"D:\CMIT-zisheng"
+# 仓库根目录由脚本位置推导（不再硬编码、不再依赖 CWD）
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def read(p):
     return open(BASE + "\\" + p, encoding="utf-8").read()
@@ -30,7 +33,10 @@ for part in m.group(1).split(","):
     if b != "default":
         entries.append(b + ":" + a)
 hs_body = hs[:m.start()]
-hs_wrapped = ("(function(){\n" + hs_body + "\nwindow.HanScribeLib = {" + ",".join(entries) + "};\n})();")
+hs_wrapped = (
+    "/* HanScribe - Copyright (c) 2026 Peter Olson, MIT License (see vendor/hanscribe-LICENSE.txt) */\n"
+    "(function(){\n" + hs_body + "\nwindow.HanScribeLib = {" + ",".join(entries) + "};\n})();"
+)
 
 # 内嵌 wasm 与模型为 base64（单文件离线自洽）
 wasm_b64 = base64.b64encode(read_bytes(r"vendor\hanscribe-inference.wasm")).decode()
@@ -62,9 +68,9 @@ if first >= 0:
     tail = re.sub(r"\nconst FONT_STACK = .*?;\n", "\n", tail)
     full = head + tail
 
-import glob
+import glob as _g
 
-shard_files = sorted(glob.glob(BASE + r"\js\evo-data\shard-*.json"))
+shard_files = sorted(_g.glob(os.path.join(BASE, "js", "evo-data", "shard-*.json")))
 shards_html = []
 for i, p in enumerate(shard_files):
     txt = open(p, encoding="utf-8").read()
@@ -81,7 +87,7 @@ html = html.replace(old_tag, flag + hs_assets + "".join(shards_html) + "\n" + in
 
 css = read(r"css\style.css")
 # 扩展字体为多分块（build_font.py 生成），逐个内嵌
-ext_files = sorted(glob.glob(BASE + r"\fonts\zisheng-kai-ext-*.woff2"))
+ext_files = sorted(glob.glob(os.path.join(BASE, "fonts", "zisheng-kai-ext-*.woff2")))
 for fp in ext_files:
     fname = fp.replace("\\", "/").rsplit("/", 1)[-1]
     b64 = base64.b64encode(open(fp, "rb").read()).decode()
@@ -94,8 +100,22 @@ html = html.replace(old_css, "<style>\n" + css + "\n</style>")
 html = html.replace("<title>字·生 —— 汉字五体演变的粒子交互体验</title>",
                     "<title>字·生 —— 汉字五体演变的粒子交互体验（单文件版）</title>")
 
-out = BASE + r"\字生-单文件版.html"
-with open(out, "w", encoding="utf-8") as f:
+# ---------- 交付产物完整性断言（防"看似成功、其实仍引用外链/带着 dev 钩子"） ----------
+assert 'src="js/' not in html and "src='js/" not in html, "single file still references js/"
+assert 'href="css/' not in html, "single file still references css/"
+assert 'url("../fonts' not in html, "single file still references ../fonts"
+m = re.search(r"EVO_SHARD_COUNT = (\d+)", evo_index)
+assert m, "EVO_SHARD_COUNT not found in evo-index.js"
+assert html.count('id="evo-shard-') == int(m.group(1)) == len(shard_files), "shard count mismatch"
+assert "window.HanScribeLib = {" in html, "HanScribeLib missing"
+assert "Peter Olson" in html, "HanScribe MIT notice missing"
+assert "__noDownload" not in html and "__hsReady" not in html and "__posterSize" not in html, "dev hooks leaked into single file"
+assert 'get("dev")' not in html and "?dev=" not in html, "dev query hook leaked into single file"
+
+out = os.path.join(BASE, "字生-单文件版.html")
+tmp = out + ".tmp"
+with open(tmp, "w", encoding="utf-8") as f:
     f.write(html)
+os.replace(tmp, out)  # 原子替换，避免中途失败留下截断产物
 
 print("written:", out, len(html), "chars,", round(len(html.encode('utf-8')) / 1024 / 1024, 2), "MB")

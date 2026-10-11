@@ -95,7 +95,7 @@ export class ParticleStage {
       antialias: false,
       alpha: false,
       powerPreference: "high-performance",
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: false,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
@@ -166,6 +166,7 @@ export class ParticleStage {
 
     this.worldW = 10;
     this.worldH = 10;
+    this.reduced = false;
     this.resize();
   }
 
@@ -176,13 +177,22 @@ export class ParticleStage {
   hasCloud(key) { return !!this.clouds[key]; }
 
   removeCloud(key) {
-    if (this.target === this.clouds[key]) return;
+    // 无条件移除：当前渲染缓冲（this.current/target）持有独立引用，删除键不会影响显示，
+    // 也避免"LRU 已出队但 map 里删不掉"的慢性泄漏
     delete this.clouds[key];
   }
 
   setCloud(key, duration = 1.3) {
     const target = this.clouds[key];
     if (!target || target === this.target) return;
+    if (this.reduced) {
+      // 减少动态偏好：直接落位，不做 morph
+      this.current.set(target);
+      this.target = target;
+      this.morphT = 1;
+      this.points.geometry.attributes.position.needsUpdate = true;
+      return;
+    }
     this.from.set(this.current);
     this.target = target;
     this.morphDur = duration;
@@ -284,7 +294,7 @@ export class ParticleStage {
     if (!this._blendBuf) this._blendBuf = new Float32Array(this.count * 3);
     const s = this._blendBuf;
     for (let i = 0; i < s.length; i++) s[i] = a[i] + (b[i] - a[i]) * t;
-    if (animate) {
+    if (animate && !this.reduced) {
       this.from.set(this.current);
       this.target = s;
       this.morphDur = 1.0;
