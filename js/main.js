@@ -491,11 +491,26 @@ window.addEventListener("hashchange", () => {
 
 let wheelAcc = 0;
 let wheelLockUntil = 0;
+// 事件目标处于"还能沿该方向滚动"的容器内时，放行原生滚动（如构字面板、矮屏面板）
+function canScrollIn(el, deltaY) {
+  while (el && el !== document.body && el !== document.documentElement) {
+    if (el.scrollHeight > el.clientHeight + 2) {
+      const oy = getComputedStyle(el).overflowY;
+      if (oy === "auto" || oy === "scroll") {
+        if (deltaY < 0 && el.scrollTop > 0) return true;
+        if (deltaY > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 2) return true;
+      }
+    }
+    el = el.parentElement;
+  }
+  return false;
+}
 window.addEventListener(
   "wheel",
   (e) => {
     // 浮层 / 抽屉 / 目录 / 字库网格内部滚动优先：放行，不拦滚轮、不切章节
     if (e.target && e.target.closest && e.target.closest("#lib-overlay, #toc-drawer, #nav")) return;
+    if (canScrollIn(e.target, e.deltaY)) return;
     e.preventDefault();
     const now = performance.now();
     if (now < wheelLockUntil) return;
@@ -2110,7 +2125,7 @@ function applyQuiz(animate) {
 // 供 dev 测试钩子：当前题的正确答案文案
 
 // ---------- 构字互动（选字 + 手写，双入口） ----------
-const QUICK_PARTS = ["日", "月", "木", "火", "水", "人", "女", "子", "口", "马", "鸟", "心"];
+const QUICK_PARTS = ["日", "月", "木", "火", "水", "人", "女", "子", "口", "马", "鸟", "心", "风", "土"];
 let selection = [];
 let combineMode = "pick";
 const chipsEl = document.getElementById("chips");
@@ -2175,7 +2190,7 @@ function comboLookup(a, b) {
   return tryPairs(a, b) || tryPairs(b, a);
 }
 
-const STRUCT_NAME = { "⿰": "左右结构", "⿱": "上下结构", "⿺": "左下包围" };
+const STRUCT_NAME = { "⿰": "左右结构", "⿱": "上下结构", "⿺": "左下包围", "⿵": "上三包围", "⿸": "左上包围" };
 
 // 构字章节点云 LRU：反复挑选/合成不再累积
 const combineLRU = [];
@@ -2195,6 +2210,7 @@ async function showCombineResult(a, b) {
       '<div class="cr-actions"><button id="cr-random">随机推荐一组</button></div>';
     audio.pluck(NOTES.yu);
     document.getElementById("cr-random").addEventListener("click", randomCombo);
+    setTimeout(() => resultEl.scrollIntoView({ block: "nearest", behavior: "smooth" }), 60);
     return;
   }
   const { key, hit } = found;
@@ -2227,6 +2243,7 @@ async function showCombineResult(a, b) {
   const evoBtn = document.getElementById("cr-evolve");
   if (evoBtn) evoBtn.addEventListener("click", () => showEvolution(hit.r, rk));
   document.getElementById("cr-again").addEventListener("click", resetCombine);
+  setTimeout(() => resultEl.scrollIntoView({ block: "nearest", behavior: "smooth" }), 60);
 }
 
 function randomCombo() {
