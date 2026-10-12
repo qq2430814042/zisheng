@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
-"""build_combo.py — 生成 js/combo-data.js（构字组合库，精编版）
+"""build_combo.py — 生成 js/combo-data.js（构字组合库）
 
-内容为通行的会意/形声字结构关系（语言学事实）+ 自写解读文案，无外部数据依赖。
+两个来源：
+1) 精编条目（HY/XS/CUSTOM）：通行的会意/形声结构关系（语言学事实）+ 自写解读文案；
+2) CCD 拆解表（tools/data/ccd.json，Wikimedia Commons 项目整理，npm 包
+   chinese-characters-decomposition MIT 封装）：结构拆解事实，仅保留
+   部件与结果均在古文字字形库内、且标注无歧义的条目（详见 tools/data/NOTICE-CCD.md）。
+
 用法: python tools/build_combo.py
 """
+import base64
 import json
 import os
 import re
@@ -140,6 +146,56 @@ def xs_note(rad, full, phon):
     return "%s示意，%s提示读音——形声字。" % (a, phon)
 
 
+# ---- CCD 拆解表接入 ----
+# compositionType → 结构算子（吅=并立 / 吕·冖·咒=叠置 / 回=包围 / +=穿插）
+CCD_TYPE_MAP = {"吅": "⿰", "吕": "⿱", "冖": "⿱", "咒": "⿱", "回": "⿴", "+": "⿻"}
+# 「回」型只收外层为真包围部首的字（排除 亵=衣+执 这类误标）
+CCD_ENC = set("囗门冂匚")
+
+
+def load_evo():
+    idx = open(os.path.join(ROOT, "js", "evo-index.js"), encoding="utf-8").read()
+    chars = json.loads(re.search(r'EVO_CHARS = ("(?:[^"\\]|\\.)*");', idx).group(1))
+    bits = base64.b64decode(re.search(r'EVO_BITS = "([A-Za-z0-9+/=]+)";', idx).group(1))
+    return chars, bits
+
+
+def load_ccd(chars, bits):
+    """过滤 CCD 拆解表 → {key: {r,s,t}}（与精编条目同构，t=「拆解」）"""
+    pos = {c: i for i, c in enumerate(chars)}
+    usable = lambda ch: isinstance(ch, str) and len(ch) == 1 and pos.get(ch, -1) >= 0 and (bits[pos[ch]] & 0x1F)
+    path = os.path.join(ROOT, "tools", "data", "ccd.json")
+    if not os.path.exists(path):
+        raise SystemExit("缺少 tools/data/ccd.json（CCD 拆解表，见 tools/data/NOTICE-CCD.md）")
+    d = json.load(open(path, encoding="utf-8"))
+    H = d["headers"]
+    gi = {h: i for i, h in enumerate(H)}
+    rows = d["rows"]
+    kept, dropped = {}, {"标注存疑": 0, "结构类型排除": 0, "包围核对排除": 0, "字库未收录": 0}
+    for r in rows:
+        c, lc, rc = r[gi["component"]], r[gi["leftComponent"]], r[gi["rightComponent"]]
+        ct, notes = r[gi["compositionType"]], r[gi["notes"]] or ""
+        if any(x in notes for x in "?*#"):
+            dropped["标注存疑"] += 1
+            continue
+        op = CCD_TYPE_MAP.get(ct)
+        if not op:
+            dropped["结构类型排除"] += 1
+            continue
+        if ct == "回" and lc not in CCD_ENC:
+            dropped["包围核对排除"] += 1
+            continue
+        if not (usable(lc) and usable(rc) and usable(c)) or c == lc or c == rc:
+            dropped["字库未收录"] += 1
+            continue
+        key = lc + rc
+        rank = pos[c]
+        if key not in kept or rank < kept[key][0]:
+            kept[key] = (rank, {"r": c, "s": op, "t": "拆解"})
+    print("CCD 过滤：保留 %d 条，剔除 %s" % (len(kept), dropped))
+    return {k: v[1] for k, v in kept.items()}
+
+
 def main():
     combo = {}
     for r, s, c1, c2, n in HY:
@@ -151,16 +207,24 @@ def main():
     for r, struct, c1, c2, t, n in CUSTOM:
         combo[c1 + c2] = {"r": r, "s": struct, "t": t, "n": n}
 
-    # 校验：结果字都在全量字库里（能在时间轴"看三千年"）
-    idx = open(os.path.join(ROOT, "js", "evo-index.js"), encoding="utf-8").read()
-    chars = set(json.loads(re.search(r'EVO_CHARS = ("(?:[^"\\]|\\.)*");', idx).group(1)))
-    missing = sorted({v["r"] for v in combo.values()} - chars)
-    print("combos:", len(combo), " 会意:", sum(1 for v in combo.values() if v["t"] == "会意"), " 形声:", sum(1 for v in combo.values() if v["t"] == "形声"))
+    chars, bits = load_evo()
+    curated = len(combo)
+    ccd = load_ccd(chars, bits)
+    for k, v in ccd.items():
+        if k not in combo:
+            combo[k] = v
+
+    idx_set = set(chars)
+    missing = sorted({v["r"] for v in combo.values()} - idx_set)
+    print("combos:", len(combo), " 精编:", curated, " 拆解:", len(combo) - curated,
+          " 会意:", sum(1 for v in combo.values() if v["t"] == "会意"),
+          " 形声:", sum(1 for v in combo.values() if v["t"] == "形声"))
     print("结果字不在字库:", missing if missing else "无")
 
     lines = [
         "// 构字组合库（由 tools/build_combo.py 生成，勿手改）",
-        "// 内容为通行的会意/形声结构关系（语言学事实）与自写解读文案",
+        "// 精编：通行的会意/形声结构关系（语言学事实）与自写解读文案",
+        "// 拆解：CCD 汉字拆解表（Wikimedia Commons，npm 包 chinese-characters-decomposition MIT 封装）",
         "export const COMBO_ALIAS = " + json.dumps(ALIAS, ensure_ascii=False, separators=(",", ":")) + ";",
         "export const COMBO = {",
     ]

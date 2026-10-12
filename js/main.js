@@ -2190,7 +2190,7 @@ function comboLookup(a, b) {
   return tryPairs(a, b) || tryPairs(b, a);
 }
 
-const STRUCT_NAME = { "⿰": "左右结构", "⿱": "上下结构", "⿺": "左下包围", "⿵": "上三包围", "⿸": "左上包围" };
+const STRUCT_NAME = { "⿰": "左右结构", "⿱": "上下结构", "⿺": "左下包围", "⿵": "上三包围", "⿸": "左上包围", "⿴": "包围结构", "⿻": "穿插结构" };
 
 // 构字章节点云 LRU：反复挑选/合成不再累积
 const combineLRU = [];
@@ -2226,6 +2226,7 @@ async function showCombineResult(a, b) {
   resultEl.innerHTML =
     '<div class="cr-head"><b>' + hit.r + "</b><i>" + (STRUCT_NAME[hit.s] || "") + " · " + hit.s + " · " + hit.t + "</i></div>" +
     '<div class="cr-parts">部件：' + c1 + " + " + c2 + "</div>" +
+    (hit.t === "拆解" ? '<div class="cr-src">结构拆解 · 数据：CCD 汉字拆解表（Wikimedia Commons）</div>' : "") +
     '<div class="cr-actions">' +
     (hit.n ? '<button id="cr-note">看解读（' + hit.t + "）</button>" : "") +
     (canEvo ? '<button id="cr-evolve">看它三千年</button>' : "") +
@@ -2248,7 +2249,9 @@ async function showCombineResult(a, b) {
 
 function randomCombo() {
   const keys = Object.keys(COMBO);
-  const k = keys[Math.floor(Math.random() * keys.length)];
+  const curated = keys.filter((k) => COMBO[k].t !== "拆解");
+  const pool = Math.random() < 0.7 && curated.length ? curated : keys;
+  const k = pool[Math.floor(Math.random() * pool.length)];
   selection = [k[0], k[1]];
   syncChips();
   showCombineResult(k[0], k[1]);
