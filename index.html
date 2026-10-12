@@ -121,10 +121,32 @@
   <section id="combine" class="panel">
     <div class="panel-inner">
       <h2>构字</h2>
-      <div class="chips" id="chips"></div>
-      <div class="combine-actions">
-        <button id="btn-combine" disabled>合 成</button>
-        <button id="btn-reset">重 置</button>
+      <p class="lead">选两个字，或亲手写两个字——看看它们会长成什么。</p>
+      <div class="combine-modes" role="tablist">
+        <button id="combine-mode-pick" class="on">选字</button>
+        <button id="combine-mode-write">手写</button>
+      </div>
+      <div id="combine-pick">
+        <div class="chips" id="chips"></div>
+        <button id="chips-more">更多部件…</button>
+        <div class="combine-actions">
+          <button id="btn-combine" disabled>合 成</button>
+          <button id="btn-reset">重 置</button>
+        </div>
+      </div>
+      <div id="combine-write" hidden>
+        <div class="cw-slots">
+          <div class="cw-slot" id="cw-slot-0"><span class="cw-num">①</span><span class="cw-char">？</span></div>
+          <div class="cw-slot" id="cw-slot-1"><span class="cw-num">②</span><span class="cw-char">？</span></div>
+        </div>
+        <canvas id="combine-canvas" width="560" height="560" aria-label="手写部件区：写一个字作为部件"></canvas>
+        <div class="write-actions cw-actions">
+          <button id="cw-particle">识别这个部件</button>
+          <button id="cw-undo">撤销</button>
+          <button id="cw-clear">清空</button>
+          <button id="cw-combine" disabled>合 成</button>
+        </div>
+        <div class="cw-recog" id="cw-recog" hidden></div>
       </div>
       <p class="combine-result" id="combine-result"></p>
     </div>

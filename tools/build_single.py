@@ -53,11 +53,12 @@ def strip_module(src):
 evo_index = strip_module(read(r"js\evo-index.js"))
 glyphs = strip_module(read(r"js\glyphs.js"))
 stroke_counts = strip_module(read(r"js\stroke-counts.js"))
+combo_data = strip_module(read(r"js\combo-data.js"))
 audio = strip_module(read(r"js\audio.js"))
 particles = strip_module(read(r"js\particles.js"))
 main = strip_module(read(r"js\main.js"))
 
-parts = [three, evo_index, glyphs, stroke_counts, hs_wrapped, audio, particles, main]
+parts = [three, evo_index, glyphs, stroke_counts, combo_data, hs_wrapped, audio, particles, main]
 full = "\n\n".join(parts)
 
 # 去掉重复的 FONT_STACK 定义（保留第一个）
@@ -108,6 +109,7 @@ m = re.search(r"EVO_SHARD_COUNT = (\d+)", evo_index)
 assert m, "EVO_SHARD_COUNT not found in evo-index.js"
 assert html.count('id="evo-shard-') == int(m.group(1)) == len(shard_files), "shard count mismatch"
 assert "window.HanScribeLib = {" in html, "HanScribeLib missing"
+assert "COMBO_ALIAS" in html, "combo data missing"
 assert "Peter Olson" in html, "HanScribe MIT notice missing"
 assert "__noDownload" not in html and "__hsReady" not in html and "__posterSize" not in html, "dev hooks leaked into single file"
 assert 'get("dev")' not in html and "?dev=" not in html, "dev query hook leaked into single file"

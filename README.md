@@ -17,6 +17,7 @@ CMIT-zisheng/
 │  ├─ particles.js       粒子引擎（点云采样 / 形态过渡 / 渲染）
 │  ├─ glyphs.js          精选 30 字手绘字形 + 扩展字库懒解码
 │  ├─ evo-index.js       全量字库索引（14,874 字 · 阶段/字体/部首/笔画位图，由 tools/build_evo.py 与 build_unihan.py 生成）
+│  ├─ combo-data.js      构字组合库（208 组会意/形声，由 tools/build_combo.py 生成）
 │  ├─ evo-data/          59 个字形数据分片（JSON，按需加载）
 │  └─ audio.js           程序化音景（Web Audio）
 ├─ vendor/                 Three.js r160（MIT）、HanScribe 手写识别（MIT）
@@ -87,4 +88,5 @@ python -m http.server 8017
 1. `python tools/build_font.py`（需 LXGW WenKai 完整 TTF，见脚本头注释）
 2. `python tools/build_evo.py`（刷新字库与字体覆盖位图）
 3. `python tools/build_unihan.py`（刷新部首/笔画数据）
+   `python tools/build_combo.py`（刷新构字组合库）
 4. `python tools/build_single.py`（单文件版，含产物完整性断言）

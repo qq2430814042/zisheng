@@ -1,6 +1,7 @@
 // main.js — 叙事控制、构字互动与数据动画
 import { ParticleStage, makeClusterCloud, makeDiskCloud } from "./particles.js";
 import { CHARS, LIB, RECOG, STAGES, STAGE_NAMES, drawGlyph, ETY, STROKE_COUNT, EVO_CHARS, EVO_COUNT, evoAvailable, evoFontOk, ensureEvo, STROKES, evoRadical, evoStrokes, radicalChar } from "./glyphs.js";
+import { COMBO, COMBO_ALIAS } from "./combo-data.js";
 import { RECOG_STROKES } from "./stroke-counts.js";
 import { AmbientAudio, NOTES } from "./audio.js";
 
@@ -606,6 +607,19 @@ libMoreBtn.addEventListener("click", () => {
 function closeLibOverlay() {
   libOverlay.classList.remove("open");
   libOverlay.setAttribute("aria-hidden", "true");
+  libPickCb = null;
+}
+// 以"挑选部件"模式打开字库网格（用于构字选字/更多部件）
+let libPickCb = null;
+function openLibPicker(cb) {
+  libPickCb = cb;
+  libOverlay.classList.add("open");
+  libOverlay.setAttribute("aria-hidden", "false");
+  libSearchEl.value = "";
+  libRadSel.value = "0";
+  libStrSel.value = "0";
+  renderLibGrid(false);
+  libSearchEl.focus();
 }
 document.getElementById("lib-close").addEventListener("click", closeLibOverlay);
 libOverlay.addEventListener("click", (e) => {
@@ -691,14 +705,27 @@ document.getElementById("lib-random").addEventListener("click", () => {
   const matches = libFilteredCells();
   if (!matches.length) return;
   const pick = matches[Math.floor(Math.random() * matches.length)];
+  if (libPickCb) {
+    const cb = libPickCb;
+    closeLibOverlay();
+    cb(pick.ch);
+    return;
+  }
   closeLibOverlay();
   loadLibChar(pick.ch, true);
 });
 libGridEl.addEventListener("click", (e) => {
   const b = e.target.closest(".lib-cell[data-ch]");
   if (!b) return;
+  const ch = b.dataset.ch;
+  if (libPickCb) {
+    const cb = libPickCb;
+    closeLibOverlay();
+    cb(ch);
+    return;
+  }
   closeLibOverlay();
-  loadLibChar(b.dataset.ch, true);
+  loadLibChar(ch, true);
 });
 
 function syncLibChips() {
@@ -1557,10 +1584,10 @@ function loadHanScribe() {
   return hsLoading;
 }
 
-// 用增强引擎识别墨迹；未就绪返回 null（调用方回退旧引擎）
-function hsRecognize() {
+// 用增强引擎识别墨迹；未就绪返回 null（调用方回退旧引擎）；source 可传任意笔迹数组
+function hsRecognize(source = inkStrokes) {
   if (!hsEngine || !hsLib) return null;
-  const strokes = inkStrokes
+  const strokes = source
     .map((st) => {
       let t = 0;
       return st.map((p, i) => {
@@ -2082,48 +2109,44 @@ function applyQuiz(animate) {
 
 // 供 dev 测试钩子：当前题的正确答案文案
 
-// ---------- 构字互动 ----------
-const CHIPS = ["日", "月", "木", "人", "女", "子"];
-const COMBO = {
-  日月: ["明", "日月为明——日是太阳，月是月亮，天下最亮的两样合在一起，就是“明”。"],
-  木木: ["林", "双木成林——两棵树并立，便是一片树林。"],
-  人木: ["休", "人倚木为休——一个人靠在树旁，就是休息。"],
-  女子: ["好", "女子为好——有孩子、有依靠，便是美好。"],
-  日日: ["昌", "双日为昌——两个太阳，寓意光明与昌盛。"],
-  木子: ["李", "木子为李——《说文》说“从木，子声”；本义是李子，后来成了姓氏。"],
-  月月: ["朋", "双月为朋——两月相随，像并肩同行的朋友。"],
-  人人: ["从", "二人为从——一个跟着一个，就是跟从。"],
-  人子: ["仔", "人旁有子——“仔”指幼小的孩子。"],
-};
-
+// ---------- 构字互动（选字 + 手写，双入口） ----------
+const QUICK_PARTS = ["日", "月", "木", "火", "水", "人", "女", "子", "口", "马", "鸟", "心"];
 let selection = [];
+let combineMode = "pick";
 const chipsEl = document.getElementById("chips");
 const btnCombine = document.getElementById("btn-combine");
 const btnReset = document.getElementById("btn-reset");
 const resultEl = document.getElementById("combine-result");
+const combineModePickBtn = document.getElementById("combine-mode-pick");
+const combineModeWriteBtn = document.getElementById("combine-mode-write");
+const combinePickEl = document.getElementById("combine-pick");
+const combineWriteEl = document.getElementById("combine-write");
 
-CHIPS.forEach((ch) => {
+QUICK_PARTS.forEach((ch) => {
   const b = document.createElement("button");
   b.className = "chip";
   b.dataset.ch = ch;
   b.textContent = ch;
   b.addEventListener("click", () => {
-    if (selection.length === 0) {
+    const i = selection.indexOf(ch);
+    if (i >= 0) selection.splice(i, 1);
+    else {
+      if (selection.length >= 2) selection.shift();
       selection.push(ch);
-    } else if (selection.length === 1) {
-      selection.push(ch);
-    } else {
-      const i = selection.indexOf(ch);
-      if (i >= 0) selection.splice(i, 1);
-      else {
-        selection.shift();
-        selection.push(ch);
-      }
     }
     syncChips();
     applyCombineCloud();
   });
   chipsEl.appendChild(b);
+});
+
+document.getElementById("chips-more").addEventListener("click", () => {
+  openLibPicker((ch) => {
+    if (selection.length >= 2) selection.shift();
+    selection.push(ch);
+    syncChips();
+    applyCombineCloud();
+  });
 });
 
 function syncChips() {
@@ -2138,11 +2161,100 @@ function ensureCloud(key, builder) {
   return key;
 }
 
+// 组合查询：直接 / 部首归一（水→氵）/ 反序，依次尝试
+function comboLookup(a, b) {
+  const variants = (x) => (COMBO_ALIAS[x] && COMBO_ALIAS[x] !== x ? [x, COMBO_ALIAS[x]] : [x]);
+  const tryPairs = (x, y) => {
+    for (const c1 of variants(x)) {
+      for (const c2 of variants(y)) {
+        if (COMBO[c1 + c2]) return { key: c1 + c2, hit: COMBO[c1 + c2] };
+      }
+    }
+    return null;
+  };
+  return tryPairs(a, b) || tryPairs(b, a);
+}
+
+const STRUCT_NAME = { "⿰": "左右结构", "⿱": "上下结构", "⿺": "左下包围" };
+
+async function showCombineResult(a, b) {
+  const found = comboLookup(a, b);
+  if (!found) {
+    resultEl.innerHTML =
+      "<div>「" + a + "」和「" + b + "」在字海里还没有相遇——换个部件试试。</div>" +
+      '<div class="cr-actions"><button id="cr-random">随机推荐一组</button></div>';
+    audio.pluck(NOTES.yu);
+    document.getElementById("cr-random").addEventListener("click", randomCombo);
+    return;
+  }
+  const { key, hit } = found;
+  const c1 = key[0];
+  const c2 = key[1];
+  const canEvo = hasEvo(hit.r);
+  await document.fonts.load('64px "ZiShengKai"', hit.r).catch(() => {});
+  const rk = "res:" + hit.r;
+  stage.addCloud(rk, buildTextCloud(hit.r, L.portrait ? 260 : 290, 0.2));
+  stage.setCloud(rk, 1.5);
+  stage.setColor("#ffd9a0");
+  audio.pluck(NOTES.gongHigh);
+  resultEl.innerHTML =
+    '<div class="cr-head"><b>' + hit.r + "</b><i>" + (STRUCT_NAME[hit.s] || "") + " · " + hit.s + " · " + hit.t + "</i></div>" +
+    '<div class="cr-parts">部件：' + c1 + " + " + c2 + "</div>" +
+    '<div class="cr-actions">' +
+    (hit.n ? '<button id="cr-note">看解读（' + hit.t + "）</button>" : "") +
+    (canEvo ? '<button id="cr-evolve">看它三千年</button>' : "") +
+    '<button id="cr-again">再来一组</button></div>' +
+    (hit.n ? '<div class="cr-note" hidden>' + hit.n + "</div>" : "") +
+    (canEvo ? "" : '<div class="cr-late">「' + hit.r + "」出现较晚，字形库里还没有它的古代身形——这本身也是汉字的故事。</div>");
+  const noteBtn = document.getElementById("cr-note");
+  if (noteBtn) {
+    noteBtn.addEventListener("click", () => {
+      const n = resultEl.querySelector(".cr-note");
+      n.hidden = !n.hidden;
+      noteBtn.textContent = n.hidden ? "看解读（" + hit.t + "）" : "收起解读";
+    });
+  }
+  const evoBtn = document.getElementById("cr-evolve");
+  if (evoBtn) evoBtn.addEventListener("click", () => showEvolution(hit.r, rk));
+  document.getElementById("cr-again").addEventListener("click", resetCombine);
+}
+
+function randomCombo() {
+  const keys = Object.keys(COMBO);
+  const k = keys[Math.floor(Math.random() * keys.length)];
+  selection = [k[0], k[1]];
+  syncChips();
+  showCombineResult(k[0], k[1]);
+}
+
+function resetCombine() {
+  selection = [];
+  cwParts = [null, null];
+  cwStrokes = [];
+  cwCurrent = null;
+  cwRedraw();
+  cwSyncSlots();
+  cwRecogEl.hidden = true;
+  cwCombineBtn.disabled = true;
+  resultEl.textContent = "";
+  syncChips();
+  applyCombineCloud();
+}
+
 function applyCombineCloud() {
   if (activeId !== "combine") return;
   const yR = 0.22;
+  if (combineMode === "write") {
+    const slot = cwParts[0] || cwParts[1];
+    if (slot) {
+      stage.setCloud(ensureCloud("sel:" + slot, () => buildTextCloud(slot, L.portrait ? 260 : 300, yR)));
+    } else {
+      stage.setCloud(ensureCloud("sel:write", () => buildTextCloud("写", L.portrait ? 240 : 270, yR)));
+    }
+    return;
+  }
   if (selection.length === 0) {
-    resultEl.textContent = "选择一个部件…";
+    resultEl.textContent = "选两个部件（或点『手写』亲手写）…";
     stage.setCloud(ensureCloud("sel:prompt", () => buildTextCloud("日月", L.portrait ? 220 : 250, yR)));
   } else if (selection.length === 1) {
     resultEl.textContent = "再选一个部件……";
@@ -2156,27 +2268,191 @@ function applyCombineCloud() {
 
 btnCombine.addEventListener("click", () => {
   if (selection.length !== 2) return;
-  const a = selection[0];
-  const b = selection[1];
-  const hit = COMBO[a + b] || COMBO[b + a];
-  if (hit) {
-    const [ch, desc] = hit;
-    resultEl.textContent = desc;
-    stage.setCloud(ensureCloud("res:" + ch, () => buildTextCloud(ch, L.portrait ? 280 : 300, 0.2)), 1.5);
-    stage.setColor("#ffd9a0");
-    audio.pluck(NOTES.gongHigh);
-  } else {
-    resultEl.textContent = "这两个部件暂时没有对应的常用合体字，换一组试试。";
-    audio.pluck(NOTES.yu);
-  }
+  showCombineResult(selection[0], selection[1]);
 });
 
-btnReset.addEventListener("click", () => {
-  selection = [];
-  syncChips();
-  resultEl.textContent = "";
-  applyCombineCloud();
+btnReset.addEventListener("click", resetCombine);
+
+// —— 手写模式 ——
+const combineCanvas = document.getElementById("combine-canvas");
+const cwCtx = combineCanvas.getContext("2d");
+const cwRecogEl = document.getElementById("cw-recog");
+const cwCombineBtn = document.getElementById("cw-combine");
+let cwStrokes = [];
+let cwCurrent = null;
+let cwParts = [null, null];
+
+function cwPos(e) {
+  const r = combineCanvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) * (combineCanvas.width / r.width),
+    y: (e.clientY - r.top) * (combineCanvas.height / r.height),
+  };
+}
+
+function cwGrid() {
+  const W = combineCanvas.width;
+  const H = combineCanvas.height;
+  cwCtx.save();
+  cwCtx.strokeStyle = "rgba(233,230,223,.08)";
+  cwCtx.lineWidth = 1;
+  cwCtx.setLineDash([7, 9]);
+  cwCtx.beginPath();
+  cwCtx.moveTo(W / 2, 12);
+  cwCtx.lineTo(W / 2, H - 12);
+  cwCtx.moveTo(12, H / 2);
+  cwCtx.lineTo(W - 12, H / 2);
+  cwCtx.stroke();
+  cwCtx.restore();
+}
+
+function cwRedraw() {
+  cwCtx.clearRect(0, 0, combineCanvas.width, combineCanvas.height);
+  cwGrid();
+  cwCtx.strokeStyle = "rgba(233,230,223,.88)";
+  cwCtx.fillStyle = "rgba(233,230,223,.88)";
+  cwCtx.lineCap = "round";
+  cwCtx.lineJoin = "round";
+  cwCtx.lineWidth = 8;
+  for (const st of cwStrokes) {
+    if (st.length === 1) {
+      cwCtx.beginPath();
+      cwCtx.arc(st[0].x, st[0].y, 4, 0, Math.PI * 2);
+      cwCtx.fill();
+    } else {
+      cwCtx.beginPath();
+      cwCtx.moveTo(st[0].x, st[0].y);
+      for (let i = 1; i < st.length; i++) cwCtx.lineTo(st[i].x, st[i].y);
+      cwCtx.stroke();
+    }
+  }
+}
+
+combineCanvas.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  try {
+    combineCanvas.setPointerCapture(e.pointerId);
+  } catch (err) {
+    /* ignore */
+  }
+  cwCurrent = [cwPos(e)];
+  cwStrokes.push(cwCurrent);
 });
+combineCanvas.addEventListener("pointermove", (e) => {
+  if (!cwCurrent) return;
+  e.preventDefault();
+  const p = cwPos(e);
+  const last = cwCurrent[cwCurrent.length - 1];
+  if (Math.hypot(p.x - last.x, p.y - last.y) < 2) return;
+  cwCurrent.push(p);
+  cwRedraw();
+});
+function cwEnd() {
+  cwCurrent = null;
+}
+combineCanvas.addEventListener("pointerup", cwEnd);
+combineCanvas.addEventListener("pointercancel", cwEnd);
+
+function cwSyncSlots() {
+  [0, 1].forEach((i) => {
+    const el = document.querySelector('#cw-slot-' + i + " .cw-char");
+    if (el) el.textContent = cwParts[i] || "？";
+  });
+  cwCombineBtn.disabled = !(cwParts[0] && cwParts[1]);
+}
+
+function cwConfirm(ch) {
+  const slot = cwParts[0] ? (cwParts[1] ? -1 : 1) : 0;
+  if (slot < 0) {
+    cwRecogEl.hidden = false;
+    cwRecogEl.textContent = "两格已经满了——先点『合成』，或『清空』重来。";
+    return;
+  }
+  cwParts[slot] = ch;
+  cwSyncSlots();
+  cwStrokes = [];
+  cwCurrent = null;
+  cwRedraw();
+  cwRecogEl.hidden = true;
+  audio.pluck(NOTES.gong);
+  applyCombineCloud();
+  if (cwParts[0] && cwParts[1]) {
+    cwRecogEl.hidden = false;
+    cwRecogEl.textContent = "两个部件都齐了——点『合 成』。";
+  }
+}
+
+function cwRenderCandidates(ranked) {
+  cwRecogEl.hidden = false;
+  const pct = (s) => Math.min(99, Math.round(s * 100));
+  const top = ranked[0];
+  const second = ranked[1] || { score: 0 };
+  if (top.score >= 0.85 && top.score - second.score >= 0.25) {
+    cwRecogEl.innerHTML =
+      "<div>认出来了：<b>" + top.ch + "</b>（" + pct(top.score) + "%）</div>" +
+      '<div class="recog-actions"><button id="cw-use">就是这个</button><button id="cw-again">重写</button></div>';
+    document.getElementById("cw-use").addEventListener("click", () => cwConfirm(top.ch));
+    document.getElementById("cw-again").addEventListener("click", () => { cwStrokes = []; cwRedraw(); cwRecogEl.hidden = true; });
+  } else {
+    const cands = ranked.slice(0, 3);
+    cwRecogEl.innerHTML =
+      "<div>是哪一个？</div>" +
+      '<div class="recog-actions">' +
+      cands.map((c) => '<button data-cw="' + c.ch + '">' + c.ch + "（" + pct(c.score) + "%）</button>").join("") +
+      '<button id="cw-again">都不是</button></div>';
+    cwRecogEl.querySelectorAll("[data-cw]").forEach((b) =>
+      b.addEventListener("click", () => cwConfirm(b.dataset.cw))
+    );
+    document.getElementById("cw-again").addEventListener("click", () => { cwStrokes = []; cwRedraw(); cwRecogEl.hidden = true; });
+  }
+}
+
+document.getElementById("cw-particle").addEventListener("click", () => {
+  if (!cwStrokes.length) {
+    cwRecogEl.hidden = false;
+    cwRecogEl.textContent = "先在画布上写一个部件（一笔也行）。";
+    return;
+  }
+  const hs = hsRecognize(cwStrokes);
+  if (hs) {
+    cwRenderCandidates(hs);
+  } else {
+    cwRecogEl.hidden = false;
+    cwRecogEl.textContent = hsState === "failed" ? "识别引擎不可用（离线）——切到『选字』方式吧。" : "识别引擎加载中，稍等一两秒再点一次。";
+    if (!hsEngine && !hsLoading) loadHanScribe();
+  }
+});
+document.getElementById("cw-undo").addEventListener("click", () => {
+  cwStrokes.pop();
+  cwRedraw();
+});
+document.getElementById("cw-clear").addEventListener("click", () => {
+  cwStrokes = [];
+  cwCurrent = null;
+  cwRedraw();
+  cwRecogEl.hidden = true;
+});
+cwCombineBtn.addEventListener("click", () => {
+  if (cwParts[0] && cwParts[1]) showCombineResult(cwParts[0], cwParts[1]);
+});
+
+// —— 模式切换 ——
+function setCombineMode(m) {
+  combineMode = m;
+  combineModePickBtn.classList.toggle("on", m === "pick");
+  combineModeWriteBtn.classList.toggle("on", m === "write");
+  combinePickEl.hidden = m !== "pick";
+  combineWriteEl.hidden = m !== "write";
+  resultEl.textContent = "";
+  if (m === "write") {
+    if (!hsEngine && !hsLoading) loadHanScribe();
+    cwRedraw();
+  }
+  applyCombineCloud();
+}
+combineModePickBtn.addEventListener("click", () => setCombineMode("pick"));
+combineModeWriteBtn.addEventListener("click", () => setCombineMode("write"));
+cwSyncSlots();
 
 // ---------- 数据小节动画 ----------
 const dataEl = document.getElementById("data");
