@@ -244,9 +244,6 @@ const NAV_GROUPS = [
   { key: "end", name: "收束", items: [12, 13] },
 ];
 
-const expandedGroups = {}; // 桌面：点击展开状态
-const mobileExpanded = {}; // 抽屉：点击展开状态
-let hoverGroup = null; // 桌面：悬停展开
 let activeGroupKey = "hero";
 const navLeafEls = {}; // sectionIndex -> [桌面元素, 抽屉元素]
 const groupHeads = {}; // key -> { desk, mob }
@@ -292,23 +289,12 @@ function buildGroup(listEl, g, mobile) {
     sub.appendChild(sli);
     registerLeaf(idx, a, false);
   });
+  head.setAttribute("aria-label", g.name + "：进入第一项「" + sections[g.items[0]].label + "」");
   head.addEventListener("click", () => {
-    if (mobile) mobileExpanded[g.key] = !isGroupOpen(g.key, true);
-    else expandedGroups[g.key] = !isGroupOpen(g.key, false);
-    renderNavState();
+    // 点大标题 = 直达该组第一项；导航后本组自动展开、其他组收起（稳定手风琴）
+    goTo(g.items[0]);
+    if (mobile) closeDrawer();
   });
-  if (!mobile) {
-    li.addEventListener("mouseenter", () => {
-      hoverGroup = g.key;
-      renderNavState();
-    });
-    li.addEventListener("mouseleave", () => {
-      if (hoverGroup === g.key) {
-        hoverGroup = null;
-        renderNavState();
-      }
-    });
-  }
   li.appendChild(head);
   li.appendChild(sub);
   listEl.appendChild(li);
@@ -338,28 +324,22 @@ function buildHero(listEl, mobile) {
   registerLeaf(0, a, !mobile);
 }
 
-function isGroupOpen(key, mobile) {
-  if (key === activeGroupKey) return true; // 当前组强制展开
-  if (mobile) return !!mobileExpanded[key];
-  return !!expandedGroups[key] || hoverGroup === key;
-}
-
 function renderNavState() {
   NAV_GROUPS.forEach((g) => {
-    const deskOpen = g.key === activeGroupKey || !!expandedGroups[g.key] || hoverGroup === g.key;
-    const mobOpen = g.key === activeGroupKey || !!mobileExpanded[g.key];
+    // 稳定手风琴：任何时刻只有"当前组"展开，不再随悬停跳动
+    const open = g.key === activeGroupKey;
     const heads = groupHeads[g.key];
     const els = groupEls[g.key];
     if (!heads) return;
     if (heads.desk) {
-      heads.desk.setAttribute("aria-expanded", deskOpen ? "true" : "false");
+      heads.desk.setAttribute("aria-expanded", open ? "true" : "false");
       heads.desk.classList.toggle("active", g.key === activeGroupKey);
-      els.desk.classList.toggle("open", deskOpen);
+      els.desk.classList.toggle("open", open);
     }
     if (heads.mob) {
-      heads.mob.setAttribute("aria-expanded", mobOpen ? "true" : "false");
+      heads.mob.setAttribute("aria-expanded", open ? "true" : "false");
       heads.mob.classList.toggle("active", g.key === activeGroupKey);
-      els.mob.classList.toggle("open", mobOpen);
+      els.mob.classList.toggle("open", open);
     }
   });
 }
