@@ -946,7 +946,11 @@ function inkPos(e) {
 
 inkCanvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
-  inkCanvas.setPointerCapture(e.pointerId);
+  try {
+    inkCanvas.setPointerCapture(e.pointerId);
+  } catch (err) {
+    /* 合成/异常指针：无捕获照常书写 */
+  }
   inkCanvas.classList.remove("dimmed");
   const p = inkPos(e);
   p.w = INK_MAX_W * 0.8;
