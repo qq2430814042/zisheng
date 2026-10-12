@@ -2177,6 +2177,16 @@ function comboLookup(a, b) {
 
 const STRUCT_NAME = { "⿰": "左右结构", "⿱": "上下结构", "⿺": "左下包围" };
 
+// 构字章节点云 LRU：反复挑选/合成不再累积
+const combineLRU = [];
+function combineCloud(key) {
+  if (!combineLRU.includes(key)) {
+    combineLRU.push(key);
+    while (combineLRU.length > 24) stage.removeCloud(combineLRU.shift());
+  }
+  return key;
+}
+
 async function showCombineResult(a, b) {
   const found = comboLookup(a, b);
   if (!found) {
@@ -2194,7 +2204,7 @@ async function showCombineResult(a, b) {
   await document.fonts.load('64px "ZiShengKai"', hit.r).catch(() => {});
   const rk = "res:" + hit.r;
   stage.addCloud(rk, buildTextCloud(hit.r, L.portrait ? 260 : 290, 0.2));
-  stage.setCloud(rk, 1.5);
+  stage.setCloud(combineCloud(rk), 1.5);
   stage.setColor("#ffd9a0");
   audio.pluck(NOTES.gongHigh);
   resultEl.innerHTML =
@@ -2247,22 +2257,22 @@ function applyCombineCloud() {
   if (combineMode === "write") {
     const slot = cwParts[0] || cwParts[1];
     if (slot) {
-      stage.setCloud(ensureCloud("sel:" + slot, () => buildTextCloud(slot, L.portrait ? 260 : 300, yR)));
+      stage.setCloud(combineCloud(ensureCloud("sel:" + slot, () => buildTextCloud(slot, L.portrait ? 260 : 300, yR))));
     } else {
-      stage.setCloud(ensureCloud("sel:write", () => buildTextCloud("写", L.portrait ? 240 : 270, yR)));
+      stage.setCloud(combineCloud(ensureCloud("sel:write", () => buildTextCloud("写", L.portrait ? 240 : 270, yR))));
     }
     return;
   }
   if (selection.length === 0) {
     resultEl.textContent = "选两个部件（或点『手写』亲手写）…";
-    stage.setCloud(ensureCloud("sel:prompt", () => buildTextCloud("日月", L.portrait ? 220 : 250, yR)));
+    stage.setCloud(combineCloud(ensureCloud("sel:prompt", () => buildTextCloud("日月", L.portrait ? 220 : 250, yR))));
   } else if (selection.length === 1) {
     resultEl.textContent = "再选一个部件……";
-    stage.setCloud(ensureCloud("sel:" + selection[0], L.portrait ? 260 : 300, yR));
+    stage.setCloud(combineCloud(ensureCloud("sel:" + selection[0], L.portrait ? 260 : 300, yR)));
   } else {
     resultEl.textContent = "点“合成”看看会得到什么";
     const key = "sel:" + selection.join("");
-    stage.setCloud(ensureCloud(key, () => buildTextCloud(selection.join(""), L.portrait ? 200 : 230, yR)));
+    stage.setCloud(combineCloud(ensureCloud(key, () => buildTextCloud(selection.join(""), L.portrait ? 200 : 230, yR))));
   }
 }
 
