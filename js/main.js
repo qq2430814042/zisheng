@@ -278,9 +278,10 @@ function buildGroup(listEl, g, mobile) {
     a.className = "toc-item toc-sub";
     a.href = "#" + s.id;
     a.title = s.label;
+    const hot = s.id === "combine" ? '<em class="toc-hot">特色</em>' : "";
     a.innerHTML = mobile
-      ? '<span class="toc-label">' + s.label + '</span><i class="num">' + String(idx + 1).padStart(2, "0") + "</i>"
-      : '<i class="toc-tick" aria-hidden="true"></i><span class="toc-label">' + s.label + "</span>";
+      ? '<span class="toc-label">' + s.label + "</span>" + hot + '<i class="num">' + String(idx + 1).padStart(2, "0") + "</i>"
+      : '<i class="toc-tick" aria-hidden="true"></i><span class="toc-label">' + s.label + "</span>" + hot;
     a.addEventListener("click", (e) => {
       e.preventDefault();
       goTo(idx);
@@ -439,6 +440,30 @@ soundBtn.addEventListener("click", async () => {
       audio.pluck(NOTES.gong);
     }
   }
+});
+
+// 音色选择（四个音色，记忆用户偏好）
+const timbreSel = document.getElementById("timbre-sel");
+try {
+  const saved = localStorage.getItem("zisheng-timbre");
+  if (saved && audio.setTimbre(saved)) timbreSel.value = saved;
+} catch (e) {
+  /* ignore */
+}
+timbreSel.addEventListener("change", () => {
+  audio.setTimbre(timbreSel.value);
+  try {
+    localStorage.setItem("zisheng-timbre", timbreSel.value);
+  } catch (e) {
+    /* ignore */
+  }
+  if (audio.enabled) audio.pluck(NOTES.gongHigh);
+});
+
+// 开篇"构字实验室"特色入口
+document.getElementById("hero-combine").addEventListener("click", () => {
+  const i = sections.findIndex((s) => s.id === "combine");
+  if (i >= 0) goTo(i);
 });
 
 // 按笔画数分配音高（2 画最低，7 画以上最高）
