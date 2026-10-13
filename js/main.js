@@ -1945,12 +1945,42 @@ window.addEventListener("keydown", (e) => {
 });
 setWriteMode("free");
 
-// ---------- 认字：三关制（认形 / 知义 / 辨体） ----------
-const QUIZ_STAGES = [
-  { key: "shape", name: "认形", count: 10, lead: "热身关：看字形猜今字——这个甲骨文是今天的哪个字？" },
-  { key: "meaning", name: "知义", count: 6, lead: "理解关：它的本义是什么？" },
-  { key: "order", name: "辨体", count: 4, lead: "时间关：左右两个字形，哪一个更早？" },
-];
+// ---------- 认字：三关制（认形 / 知义 / 辨体）× 三档难度 ----------
+// 简单：干扰项字形相差远、辨体相隔远；普通：默认；困难：认形全字库随机+同部首干扰、辨体比相邻字体
+const QUIZ_LEVELS = {
+  easy: {
+    name: "简单",
+    stages: [
+      { key: "shape", name: "认形", count: 6, dist: "far", lead: "热身关：看字形猜今字——干扰项字形相差很远。" },
+      { key: "meaning", name: "知义", count: 4, lead: "理解关：它的本义是什么？" },
+      { key: "order", name: "辨体", count: 3, lead: "时间关：左右两个字形，哪一个更早？（相隔较远，好认）", pairs: [[0, 3], [0, 4], [1, 4]] },
+    ],
+  },
+  normal: {
+    name: "普通",
+    stages: [
+      { key: "shape", name: "认形", count: 10, dist: "near", lead: "热身关：看字形猜今字——这个甲骨文是今天的哪个字？" },
+      { key: "meaning", name: "知义", count: 6, lead: "理解关：它的本义是什么？" },
+      { key: "order", name: "辨体", count: 4, lead: "时间关：左右两个字形，哪一个更早？", pairs: [[0, 2], [1, 3], [2, 4], [0, 4]] },
+    ],
+  },
+  hard: {
+    name: "困难",
+    stages: [
+      { key: "shape", name: "认形", count: 12, dist: "radical", lead: "挑战关：从全字库随机抽取的甲骨文，干扰项同部首——小心认。", },
+      { key: "meaning", name: "知义", count: 8, lead: "理解关：它的本义是什么？" },
+      { key: "order", name: "辨体", count: 5, lead: "时间关：相邻字体最难分辨——哪一个更早？", pairs: [[0, 1], [1, 2], [2, 3], [3, 4]] },
+    ],
+  },
+};
+let quizLevel = "normal";
+try {
+  const savedLv = localStorage.getItem("zisheng-quiz-level");
+  if (savedLv && QUIZ_LEVELS[savedLv]) quizLevel = savedLv;
+} catch (e) {
+  /* ignore */
+}
+let QUIZ_STAGES = QUIZ_LEVELS[quizLevel].stages;
 const quizOptsEl = document.getElementById("quiz-options");
 const quizFeedbackEl = document.getElementById("quiz-feedback");
 const quizProgressEl = document.getElementById("quiz-progress");
@@ -1962,6 +1992,31 @@ let quizWrong = false;
 let quizRound = [];
 let quizTimer = null;
 
+// 难度选择（三档，记忆偏好；切换即重开一轮）
+const quizLvBtns = Array.from(document.querySelectorAll(".quiz-levels button"));
+function syncQuizLevelUI() {
+  quizLvBtns.forEach((b) => b.classList.toggle("on", b.dataset.lv === quizLevel));
+}
+quizLvBtns.forEach((b) =>
+  b.addEventListener("click", () => {
+    if (b.dataset.lv === quizLevel) return;
+    quizLevel = b.dataset.lv;
+    try {
+      localStorage.setItem("zisheng-quiz-level", quizLevel);
+    } catch (e) {
+      /* ignore */
+    }
+    QUIZ_STAGES = QUIZ_LEVELS[quizLevel].stages;
+    qs = 0;
+    qi = 0;
+    quizScore = 0;
+    quizRound = [];
+    syncQuizLevelUI();
+    if (activeId === "quiz") startQuizRound();
+  })
+);
+syncQuizLevelUI();
+
 function shuffleArr(a) {
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -1972,17 +2027,72 @@ function shuffleArr(a) {
   return a;
 }
 
+// 轮次不重样：记住最近用过的字（localStorage 持久化），下一轮优先排除
+let quizRecent = [];
+try {
+  const saved = JSON.parse(localStorage.getItem("zisheng-quiz-recent") || "[]");
+  if (Array.isArray(saved)) quizRecent = saved.filter((c) => typeof c === "string" && c.length === 1);
+} catch (e) {
+  /* ignore */
+}
+function quizSaveRecent() {
+  try {
+    localStorage.setItem("zisheng-quiz-recent", JSON.stringify(quizRecent));
+  } catch (e) {
+    /* ignore */
+  }
+}
+function pickQuizChars(pool, n) {
+  let fresh = pool.filter((c) => !quizRecent.includes(c));
+  let picked = shuffleArr(fresh.slice()).slice(0, n);
+  if (picked.length < n) {
+    // 池子快用完：只保留最近 6 个在记忆里，其余释放后补足
+    quizRecent = quizRecent.slice(-6);
+    fresh = pool.filter((c) => !quizRecent.includes(c) && !picked.includes(c));
+    picked = picked.concat(shuffleArr(fresh).slice(0, n - picked.length));
+  }
+  quizRecent = quizRecent.concat(picked).slice(-40);
+  quizSaveRecent();
+  return picked;
+}
+
+// 困难级认形题库：全字库中有甲骨文且有内嵌字体的字（一次构建，之后复用）
+let evoQuizPool = null;
+function getEvoQuizPool() {
+  if (!evoQuizPool) {
+    evoQuizPool = [];
+    for (const ch of EVO_CHARS) {
+      const av = evoAvailable(ch);
+      if (av && av.includes("oracle") && evoFontOk(ch)) evoQuizPool.push(ch);
+    }
+  }
+  return evoQuizPool;
+}
+
 function templateSim(a, b) {
   let d = 0;
   for (let i = 0; i < a.length; i++) d += a[i] * b[i];
   return d;
 }
 
-function makeShapeQuestion(ch) {
+function makeShapeQuestion(ch, dist) {
+  if (dist === "radical") {
+    // 困难：全字库字形 + 同部首干扰（部首太小时用随机字补足）
+    const rad = evoRadical(ch);
+    const pool = getEvoQuizPool().filter((c) => c !== ch);
+    let mates = rad ? pool.filter((c) => evoRadical(c) === rad) : [];
+    mates = shuffleArr(mates).slice(0, 3);
+    if (mates.length < 3) {
+      const extra = shuffleArr(pool.filter((c) => !mates.includes(c))).slice(0, 3 - mates.length);
+      mates = mates.concat(extra);
+    }
+    return { ch, opts: shuffleArr([ch].concat(mates)), evo: true };
+  }
   const ranked = LIB.filter((c) => c !== ch)
     .map((c) => ({ c, s: templateSim(TEMPLATES[ch][1], TEMPLATES[c][1]) }))
     .sort((x, y) => y.s - x.s);
-  return { ch, opts: shuffleArr([ch, ...ranked.slice(0, 3).map((o) => o.c)]) };
+  const others = dist === "far" ? ranked.slice(-3) : ranked.slice(0, 3);
+  return { ch, opts: shuffleArr([ch].concat(others.map((o) => o.c))) };
 }
 
 function makeMeaningQuestion(ch) {
@@ -1990,15 +2100,15 @@ function makeMeaningQuestion(ch) {
   return { ch, opts: shuffleArr([ch, ...others]) };
 }
 
-function makeOrderQuestion(ch) {
-  const pairs = [
+function makeOrderQuestion(ch, pairs) {
+  const pl = pairs || [
     [0, 2],
     [0, 4],
     [1, 3],
     [1, 4],
     [2, 4],
   ];
-  const p = pairs[Math.floor(Math.random() * pairs.length)];
+  const p = pl[Math.floor(Math.random() * pl.length)];
   const leftFirst = Math.random() < 0.5;
   return {
     ch,
@@ -2010,9 +2120,12 @@ function makeOrderQuestion(ch) {
 
 function startQuizRound() {
   const lv = QUIZ_STAGES[qs];
-  const chars = shuffleArr([...LIB]).slice(0, lv.count);
+  const chars =
+    lv.key === "shape" && lv.dist === "radical"
+      ? pickQuizChars(getEvoQuizPool(), lv.count)
+      : pickQuizChars(LIB, lv.count);
   quizRound = chars.map((ch) =>
-    lv.key === "shape" ? makeShapeQuestion(ch) : lv.key === "meaning" ? makeMeaningQuestion(ch) : makeOrderQuestion(ch)
+    lv.key === "shape" ? makeShapeQuestion(ch, lv.dist) : lv.key === "meaning" ? makeMeaningQuestion(ch) : makeOrderQuestion(ch, lv.pairs)
   );
   qi = 0;
   renderQuestion(true);
@@ -2045,8 +2158,24 @@ function renderQuestion(animate) {
   quizWrong = false;
   clearTimeout(quizTimer);
   quizLeadEl.textContent = lv.lead;
-  stage.setCloud(quizGlyphCloud(q), animate ? 1.1 : false);
-  stage.setColor("#ffd9a0");
+  // 困难级认形：全字库字形需异步加载（首次慢，之后缓存秒开）
+  if (q.evo && !STROKES[q.ch]) {
+    quizFeedbackEl.textContent = "字形加载中……";
+    ensureEvo(q.ch).then((ok) => {
+      if (quizRound[qi] !== q) return;
+      if (!ok) {
+        quizFeedbackEl.textContent = "字形加载失败——跳过这一题。";
+        quizTimer = setTimeout(quizAdvance, 1600);
+        return;
+      }
+      quizFeedbackEl.textContent = "";
+      stage.setCloud(quizGlyphCloud(q), 1.1);
+      stage.setColor("#ffd9a0");
+    });
+  } else {
+    stage.setCloud(quizGlyphCloud(q), animate ? 1.1 : false);
+    stage.setColor("#ffd9a0");
+  }
   quizOptsEl.innerHTML = "";
   const mkBtn = (label, val) => {
     const b = document.createElement("button");
@@ -2077,7 +2206,15 @@ function answerQuiz(btn) {
     pluckForChar(q.ch);
     stage.setCloud(ensureCloud("quiz:" + q.ch + ":regular", () => buildSingleCloud(q.ch, "regular", 0.3)), 1.0);
     if (lv.key === "shape") {
-      quizFeedbackEl.textContent = "对！" + (ETY[q.ch] ? ETY[q.ch].note : "");
+      let note;
+      if (ETY[q.ch]) {
+        note = ETY[q.ch].note;
+      } else {
+        const av = evoAvailable(q.ch);
+        const radTxt = evoRadical(q.ch) ? "属「" + radicalChar(evoRadical(q.ch)) + "」部" : "";
+        note = "『" + q.ch + "』" + radTxt + (av ? "，字库中首见" + STAGE_NAMES[av[0]] + "。" : "。");
+      }
+      quizFeedbackEl.textContent = "对！" + note;
       quizTimer = setTimeout(quizAdvance, 1700);
     } else if (lv.key === "meaning") {
       quizFeedbackEl.textContent = "对！『" + q.ch + "』的造字法是" + (ETY[q.ch] ? ETY[q.ch].method : "") + "。";

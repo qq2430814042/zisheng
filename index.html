@@ -201,6 +201,11 @@
     <div class="panel-inner">
       <h2>认字</h2>
       <p class="lead" id="quiz-lead">下面这个甲骨文，是今天的哪个字？</p>
+      <div class="quiz-levels" role="tablist" aria-label="难度选择">
+        <button data-lv="easy" role="tab">简单</button>
+        <button data-lv="normal" role="tab" class="on">普通</button>
+        <button data-lv="hard" role="tab">困难</button>
+      </div>
       <div class="quiz-options" id="quiz-options"></div>
       <div class="quiz-feedback" id="quiz-feedback"></div>
       <div class="quiz-progress" id="quiz-progress"></div>

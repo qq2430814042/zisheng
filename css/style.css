@@ -979,6 +979,24 @@ main { position: relative; z-index: 2; }
   color: var(--accent);
   background: rgba(224, 179, 106, .12);
 }
+.quiz-levels { display: flex; gap: 8px; margin: 12px 0 6px; }
+.quiz-levels button {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  letter-spacing: .15em;
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition: all .2s ease;
+}
+.quiz-levels button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(224, 179, 106, .12);
+}
 .guide-bar {
   display: flex;
   align-items: center;
