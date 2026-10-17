@@ -119,7 +119,7 @@ def head(s, kicker, title, sub=None):
 
 
 def foot(s, page):
-    tb(s, 0.62, 7.03, 8, 0.3, [{"runs": [("《字·生》· 作品编号 316056 · 牛景飞（北京语言大学）", 10, "6B675E")]}])
+    tb(s, 0.62, 7.03, 8, 0.3, [{"runs": [("《字·生》· 作品编号 316056", 10, "6B675E")]}])
     tb(s, 12.2, 7.03, 0.9, 0.3, [{"runs": [(page, 10, "6B675E")], "align": PP_ALIGN.RIGHT}])
 
 
@@ -170,7 +170,7 @@ tb(s, 0.8, 3.95, 9.2, 0.7, [{"runs": [("汉字五体演变的粒子交互体验"
 rect(s, 0.85, 4.75, 2.2, 0.03, GOLD)
 tb(s, 0.8, 5.05, 9.2, 1.3, [
     {"runs": [("一个用数万枚实时粒子讲汉字故事、并能亲手构字书写的交互网页", 13, DIM)]},
-    {"runs": [("作品编号 316056 ｜ 作者：牛景飞（北京语言大学）｜ 个人参赛 · 2026", 13, DIM)], "before": 8},
+    {"runs": [("作品编号 316056 ｜ 个人参赛 · 2026", 13, DIM)], "before": 8},
 ])
 
 # ---------- S2 一句话定位 ----------
@@ -371,10 +371,10 @@ tb(s, 0, 2.15, W, 1.6, [{"runs": [("字·生", 60, INK, False, KAI)], "align": P
 rect(s, 5.57, 3.8, 2.2, 0.03, GOLD)
 tb(s, 0, 4.1, W, 0.6, [{"runs": [("让沉默的字符，在粒子系统中重新「活」起来", 18, DIM)], "align": PP_ALIGN.CENTER}])
 tb(s, 0, 4.85, W, 0.5, [{"runs": [("课堂 · 展馆 · 国际中文教育　——　一套可以即刻打开、离线运行的汉字数字体验", 13, "8F8A80")], "align": PP_ALIGN.CENTER}])
-tb(s, 0, 6.1, W, 0.5, [{"runs": [("作品编号 316056 · 牛景飞（北京语言大学）· 2026", 11.5, "6B675E")], "align": PP_ALIGN.CENTER}])
+tb(s, 0, 6.1, W, 0.5, [{"runs": [("作品编号 316056 · 2026", 11.5, "6B675E")], "align": PP_ALIGN.CENTER}])
 
 prs.core_properties.title = "字·生 — 汉字五体演变的粒子交互体验（参赛演示文稿）"
-prs.core_properties.author = "牛景飞"
+prs.core_properties.author = "匿名评审"
 prs.core_properties.subject = "第十四届全国大学生数字媒体科技作品及创意竞赛 · 作品编号 316056"
 prs.core_properties.comments = "由 tools/build_ppt.py 生成；截图与文案与单文件版作品同步。"
 
